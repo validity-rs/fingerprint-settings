@@ -1,0 +1,31 @@
+# Debian 13 (trixie) with the Rust toolchain from the official image: where CI
+# runs rustfmt, clippy, rustdoc and the tests.
+#
+# Debian 13 is the oldest supported platform: GTK 4.18 and libadwaita 1.7,
+# which the crate's feature flags match. Debian's own rustc is older than the
+# crate's rust-version, hence the official image rather than apt's rustc.
+#
+# Pinned by version and digest (the same as validity-rs's): an unpinned tag
+# would land a new toolchain, and with it new clippy lints, with no change to
+# show for it.
+FROM rust:1.99.1-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc
+
+# libgtk-4-dev, libadwaita-1-dev: the application.
+# dbus-daemon: the end-to-end test starts a private bus.
+# desktop-file-utils, appstream: the packaging job validates the desktop entry
+# and the metainfo.
+RUN rustup component add clippy rustfmt \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        appstream \
+        dbus-daemon \
+        desktop-file-utils \
+        libadwaita-1-dev \
+        libgtk-4-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && rustc --version && cargo clippy --version && cargo fmt --version \
+    && dbus-daemon --version | head -1 \
+    && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/bash"]

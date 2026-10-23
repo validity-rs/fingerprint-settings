@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 validity-rs contributors -->
+<component type="desktop-application">
+  <id>io.github.validity_rs.FingerprintSettings</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Fingerprints</name>
+  <name xml:lang="fr">Empreintes digitales</name>
+  <summary>Add, test and remove the fingerprints that unlock your computer</summary>
+  <summary xml:lang="fr">Ajouter, tester et supprimer les empreintes qui déverrouillent votre ordinateur</summary>
+
+  <developer id="io.github.validity_rs">
+    <name>validity-rs contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Register your fingers to unlock the computer by touching the fingerprint reader,
+      check that a finger is recognised, and remove fingerprints you no longer use.
+      Your password always keeps working.
+    </p>
+    <p xml:lang="fr">
+      Enregistrez vos doigts pour déverrouiller l'ordinateur en touchant le lecteur
+      d'empreintes, vérifiez qu'un doigt est bien reconnu, et supprimez les empreintes
+      dont vous ne vous servez plus. Votre mot de passe fonctionne toujours.
+    </p>
+    <p>
+      Made for desktops without fingerprint settings of their own, such as XFCE, MATE
+      and LXQt. It works with any fingerprint service that speaks the fprintd D-Bus
+      interface, fprintd itself included.
+    </p>
+    <p xml:lang="fr">
+      Conçu pour les bureaux qui n'ont pas leurs propres réglages d'empreintes, comme
+      XFCE, MATE et LXQt. Fonctionne avec tout service d'empreintes qui parle
+      l'interface D-Bus de fprintd, fprintd lui-même compris.
+    </p>
+    <ul>
+      <li>Large, plain instructions while a finger is being registered</li>
+      <li xml:lang="fr">De grandes consignes simples pendant l'enregistrement d'un doigt</li>
+      <li>Usable with the keyboard alone and with a screen reader</li>
+      <li xml:lang="fr">Utilisable au clavier seul et avec un lecteur d'écran</li>
+      <li>English and French</li>
+      <li xml:lang="fr">En anglais et en français</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.validity_rs.FingerprintSettings.desktop</launchable>
+  <url type="homepage">https://github.com/validity-rs/fingerprint-settings</url>
+  <url type="bugtracker">https://github.com/validity-rs/fingerprint-settings/issues</url>
+  <url type="vcs-browser">https://github.com/validity-rs/fingerprint-settings</url>
+
+  <categories>
+    <category>Settings</category>
+    <category>HardwareSettings</category>
+  </categories>
+  <keywords>
+    <keyword>fingerprint</keyword>
+    <keyword>fprintd</keyword>
+    <keyword>unlock</keyword>
+    <keyword xml:lang="fr">empreinte</keyword>
+    <keyword xml:lang="fr">déverrouiller</keyword>
+  </keywords>
+
+  <provides>
+    <binary>fingerprint-settings</binary>
+  </provides>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-10-23">
+      <description>
+        <p>First release.</p>
+        <p xml:lang="fr">Première version.</p>
+      </description>
+    </release>
+  </releases>
+</component>

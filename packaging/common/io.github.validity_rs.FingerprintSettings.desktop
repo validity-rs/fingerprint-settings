@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Fingerprints
+Name[fr]=Empreintes digitales
+GenericName=Fingerprint Settings
+GenericName[fr]=Réglages des empreintes digitales
+Comment=Add, test and remove the fingerprints that unlock your computer
+Comment[fr]=Ajouter, tester et supprimer les empreintes qui déverrouillent votre ordinateur
+Exec=fingerprint-settings
+Icon=io.github.validity_rs.FingerprintSettings
+Terminal=false
+StartupNotify=true
+# X-XFCE-*: listed in the XFCE Settings Manager, under Hardware.
+Categories=GTK;Settings;HardwareSettings;X-XFCE-SettingsDialog;X-XFCE-HardwareSettings;
+Keywords=fingerprint;finger;biometric;login;unlock;fprint;
+Keywords[fr]=empreinte;doigt;biométrie;connexion;déverrouiller;

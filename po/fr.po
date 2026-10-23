@@ -1,0 +1,390 @@
+# French translation of Fingerprints (fingerprint-settings).
+# Copyright (C) 2026 validity-rs contributors
+# This file is distributed under the same license as the fingerprint-settings package (MIT).
+#
+# French typography: a no-break space (U+00A0) before ":", "?" and "!".
+msgid ""
+msgstr ""
+"Project-Id-Version: fingerprint-settings 0.1.0\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# ---------------------------------------------------------------- application
+
+msgid "Fingerprints"
+msgstr "Empreintes digitales"
+
+msgid "Looking for the fingerprint reader…"
+msgstr "Recherche du lecteur d'empreintes…"
+
+msgid "Fingerprint reader: {name}"
+msgstr "Lecteur d'empreintes : {name}"
+
+msgid "Try again"
+msgstr "Réessayer"
+
+msgid "Technical details"
+msgstr "Détails techniques"
+
+msgid "Cancel"
+msgstr "Annuler"
+
+msgid "OK"
+msgstr "OK"
+
+# ---------------------------------------------------------------- fingers page
+
+msgid "No fingerprints yet"
+msgstr "Aucune empreinte enregistrée"
+
+msgid ""
+"A registered finger lets you unlock this computer by simply touching the "
+"fingerprint reader, instead of typing your password."
+msgstr ""
+"Un doigt enregistré vous permet de déverrouiller cet ordinateur en touchant "
+"simplement le lecteur d'empreintes, au lieu de taper votre mot de passe."
+
+msgid "Your password always keeps working: you can still use it at any time."
+msgstr ""
+"Votre mot de passe fonctionne toujours : vous pouvez l'utiliser à tout "
+"moment."
+
+msgid "Your registered fingers"
+msgstr "Vos doigts enregistrés"
+
+msgid "Touch the reader with one of these fingers to unlock the computer."
+msgstr ""
+"Touchez le lecteur avec l'un de ces doigts pour déverrouiller l'ordinateur."
+
+msgid "Add a finger"
+msgstr "Ajouter un doigt"
+
+msgid "Test a finger"
+msgstr "Tester un doigt"
+
+msgid "Remove"
+msgstr "Supprimer"
+
+msgid "Remove: {finger}"
+msgstr "Supprimer : {finger}"
+
+msgid "Removing the fingerprint…"
+msgstr "Suppression de l'empreinte…"
+
+msgid "Fingerprint removed: {finger}"
+msgstr "Empreinte supprimée : {finger}"
+
+msgid "All your fingerprints were removed."
+msgstr "Toutes vos empreintes ont été supprimées."
+
+msgid "Remove this fingerprint?"
+msgstr "Supprimer cette empreinte ?"
+
+msgid ""
+"Your {finger} will no longer unlock this computer. You can add it again "
+"later."
+msgstr ""
+"Votre {finger} ne pourra plus déverrouiller cet ordinateur. Vous pourrez "
+"l'ajouter de nouveau plus tard."
+
+msgid "Remove all your fingerprints?"
+msgstr "Supprimer toutes vos empreintes ?"
+
+msgid ""
+"This fingerprint service can only remove all your fingerprints at once, not "
+"a single one. You can add the others again afterwards."
+msgstr ""
+"Ce service d'empreintes ne sait supprimer que toutes vos empreintes à la "
+"fois, pas une seule. Vous pourrez ensuite ajouter de nouveau les autres."
+
+msgid "Remove all"
+msgstr "Tout supprimer"
+
+# ---------------------------------------------------------------- fingers
+
+msgid "Left hand"
+msgstr "Main gauche"
+
+msgid "Right hand"
+msgstr "Main droite"
+
+msgid "Left thumb"
+msgstr "Pouce gauche"
+
+msgid "Left index finger"
+msgstr "Index gauche"
+
+msgid "Left middle finger"
+msgstr "Majeur gauche"
+
+msgid "Left ring finger"
+msgstr "Annulaire gauche"
+
+msgid "Left little finger"
+msgstr "Petit doigt gauche"
+
+msgid "Right thumb"
+msgstr "Pouce droit"
+
+msgid "Right index finger"
+msgstr "Index droit"
+
+msgid "Right middle finger"
+msgstr "Majeur droit"
+
+msgid "Right ring finger"
+msgstr "Annulaire droit"
+
+msgid "Right little finger"
+msgstr "Petit doigt droit"
+
+# ---------------------------------------------------------------- choosing a finger
+
+msgid "Which finger do you want to add?"
+msgstr "Quel doigt voulez-vous ajouter ?"
+
+msgid ""
+"Choose a finger that is easy to place on the reader, such as an index "
+"finger."
+msgstr ""
+"Choisissez un doigt facile à poser sur le lecteur, par exemple un index."
+
+msgid "Already registered"
+msgstr "Déjà enregistré"
+
+msgid "Back"
+msgstr "Retour"
+
+# ---------------------------------------------------------------- enrolment
+
+msgid "Adding your {finger}"
+msgstr "Ajout de votre {finger}"
+
+msgid "Getting the reader ready…"
+msgstr "Préparation du lecteur…"
+
+msgid "Step {step} of {total}"
+msgstr "Étape {step} sur {total}"
+
+msgid "Good scans so far: {count}"
+msgstr "Lectures réussies : {count}"
+
+msgid "Progress"
+msgstr "Progression"
+
+msgid "Place your {finger} flat on the reader."
+msgstr "Posez votre {finger} à plat sur le lecteur."
+
+msgid "Slide your {finger} over the reader."
+msgstr "Faites glisser votre {finger} sur le lecteur."
+
+msgid "Good. Lift your finger, then place it on the reader again."
+msgstr "Bien. Levez le doigt, puis posez-le de nouveau sur le lecteur."
+
+msgid "Good. Slide your finger over the reader again."
+msgstr "Bien. Faites glisser de nouveau votre doigt sur le lecteur."
+
+msgid "That did not work. Lift your finger, then place it on the reader again."
+msgstr ""
+"Cela n'a pas fonctionné. Levez le doigt, puis posez-le de nouveau sur le "
+"lecteur."
+
+msgid "That did not work. Slide your finger over the reader again."
+msgstr ""
+"Cela n'a pas fonctionné. Faites glisser de nouveau votre doigt sur le "
+"lecteur."
+
+msgid "The swipe was too short. Slide your whole finger slowly over the reader."
+msgstr ""
+"Le passage était trop court. Faites glisser lentement tout votre doigt sur le "
+"lecteur."
+
+msgid "Too quick. Leave your finger on the reader a little longer."
+msgstr "Trop rapide. Laissez votre doigt un peu plus longtemps sur le lecteur."
+
+msgid "Too quick. Slide your finger more slowly."
+msgstr "Trop rapide. Faites glisser votre doigt plus lentement."
+
+msgid ""
+"Your finger was not in the middle of the reader. Place it in the middle and "
+"try again."
+msgstr ""
+"Votre doigt n'était pas au milieu du lecteur. Posez-le bien au milieu et "
+"recommencez."
+
+msgid "Lift your finger completely off the reader, then place it again."
+msgstr "Retirez complètement votre doigt du lecteur, puis posez-le de nouveau."
+
+msgid ""
+"Lift and place your finger several times, moving it slightly each time."
+msgstr ""
+"Levez et reposez votre doigt plusieurs fois, en le décalant légèrement à "
+"chaque fois."
+
+msgid "Your {finger} is registered"
+msgstr "Votre {finger} est enregistré"
+
+msgid ""
+"You can now touch the reader instead of typing your password. Your password "
+"still works too."
+msgstr ""
+"Vous pouvez maintenant toucher le lecteur au lieu de taper votre mot de "
+"passe. Votre mot de passe fonctionne toujours."
+
+msgid "The finger was not added"
+msgstr "Le doigt n'a pas été ajouté"
+
+msgid "Adding this finger did not work. Please try again."
+msgstr "L'ajout de ce doigt n'a pas fonctionné. Veuillez réessayer."
+
+msgid ""
+"The reader's memory is full. Remove a fingerprint you no longer use, then "
+"try again."
+msgstr ""
+"La mémoire du lecteur est pleine. Supprimez une empreinte que vous "
+"n'utilisez plus, puis réessayez."
+
+msgid ""
+"This fingerprint is already registered on this computer, perhaps as another "
+"finger or for another person. Choose a different finger."
+msgstr ""
+"Cette empreinte est déjà enregistrée sur cet ordinateur, peut-être comme un "
+"autre doigt ou pour une autre personne. Choisissez un autre doigt."
+
+msgid "Choose another finger"
+msgstr "Choisir un autre doigt"
+
+msgid "Add another finger"
+msgstr "Ajouter un autre doigt"
+
+msgid "Back to my fingerprints"
+msgstr "Retour à mes empreintes"
+
+# ---------------------------------------------------------------- testing
+
+msgid "Place your {finger} on the reader."
+msgstr "Posez votre {finger} sur le lecteur."
+
+msgid "Place one of your registered fingers on the reader."
+msgstr "Posez l'un de vos doigts enregistrés sur le lecteur."
+
+msgid "Slide one of your registered fingers over the reader."
+msgstr "Faites glisser l'un de vos doigts enregistrés sur le lecteur."
+
+msgid "Recognised: {finger}"
+msgstr "Reconnu : {finger}"
+
+msgid "This finger can unlock the computer."
+msgstr "Ce doigt peut déverrouiller l'ordinateur."
+
+msgid "Recognised"
+msgstr "Reconnu"
+
+msgid "This is one of your registered fingers. It can unlock the computer."
+msgstr ""
+"C'est l'un de vos doigts enregistrés. Il peut déverrouiller l'ordinateur."
+
+msgid "Not recognised"
+msgstr "Non reconnu"
+
+msgid ""
+"This finger is not registered, or it was not placed well. You can try again."
+msgstr ""
+"Ce doigt n'est pas enregistré, ou il n'a pas été bien posé. Vous pouvez "
+"réessayer."
+
+msgid "The test did not work"
+msgstr "Le test n'a pas fonctionné"
+
+msgid "Test again"
+msgstr "Tester de nouveau"
+
+# ---------------------------------------------------------------- problems
+
+msgid "The fingerprint reader was disconnected. Check that it is plugged in, then try again."
+msgstr ""
+"Le lecteur d'empreintes a été débranché. Vérifiez qu'il est bien branché, "
+"puis réessayez."
+
+msgid ""
+"The fingerprint reader had a problem. Please try again. If it happens again, "
+"restart the computer."
+msgstr ""
+"Le lecteur d'empreintes a rencontré un problème. Veuillez réessayer. Si "
+"cela se reproduit, redémarrez l'ordinateur."
+
+msgid "The fingerprint service is not available"
+msgstr "Le service d'empreintes n'est pas disponible"
+
+msgid ""
+"No fingerprint service is running on this computer. Your password still "
+"works as usual."
+msgstr ""
+"Aucun service d'empreintes ne fonctionne sur cet ordinateur. Votre mot de "
+"passe fonctionne toujours normalement."
+
+msgid "No fingerprint reader found"
+msgstr "Aucun lecteur d'empreintes trouvé"
+
+msgid ""
+"Check that the fingerprint reader is connected. If it is built into the "
+"computer, restart the computer, then try again."
+msgstr ""
+"Vérifiez que le lecteur d'empreintes est bien branché. S'il est intégré à "
+"l'ordinateur, redémarrez l'ordinateur, puis réessayez."
+
+msgid "The fingerprint reader is busy"
+msgstr "Le lecteur d'empreintes est occupé"
+
+msgid ""
+"Another program is using the reader right now, for example the lock screen. "
+"Wait a moment, then try again."
+msgstr ""
+"Un autre programme utilise le lecteur en ce moment, par exemple l'écran de "
+"verrouillage. Patientez un instant, puis réessayez."
+
+msgid "Permission denied"
+msgstr "Autorisation refusée"
+
+msgid ""
+"You are not allowed to change the fingerprints on this computer. Ask the "
+"person who looks after it."
+msgstr ""
+"Vous n'avez pas le droit de modifier les empreintes sur cet ordinateur. "
+"Demandez à la personne qui s'en occupe."
+
+msgid "No registered fingers"
+msgstr "Aucun doigt enregistré"
+
+msgid "Add a finger first, then you can test it."
+msgstr "Ajoutez d'abord un doigt, vous pourrez ensuite le tester."
+
+msgid "This finger is already registered"
+msgstr "Ce doigt est déjà enregistré"
+
+msgid "Choose another finger, or remove this one first."
+msgstr "Choisissez un autre doigt, ou supprimez d'abord celui-ci."
+
+msgid "The fingerprint could not be removed"
+msgstr "L'empreinte n'a pas pu être supprimée"
+
+msgid "The fingerprint service did not answer"
+msgstr "Le service d'empreintes ne répond pas"
+
+msgid ""
+"Wait a moment, then try again. If it happens again, restart the computer."
+msgstr ""
+"Patientez un instant, puis réessayez. Si cela se reproduit, redémarrez "
+"l'ordinateur."
+
+msgid "Something went wrong"
+msgstr "Un problème est survenu"
+
+msgid ""
+"The fingerprint service reported a problem. Please try again. If it happens "
+"again, restart the computer."
+msgstr ""
+"Le service d'empreintes a signalé un problème. Veuillez réessayer. Si cela "
+"se reproduit, redémarrez l'ordinateur."

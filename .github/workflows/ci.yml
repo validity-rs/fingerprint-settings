@@ -1,0 +1,81 @@
+name: CI
+
+# Pushes and pull requests are the gate; the weekly run notices drift nobody
+# committed (a distro package update, a registry change).
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+# A newer push supersedes the run in flight for the same ref; scheduled and
+# manual runs are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+
+jobs:
+  no-ai-traces:
+    name: No AI traces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The script checks every commit, so it needs all of them.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check commit messages, added lines, paths and pull request text
+        env:
+          # Passed through the environment, never interpolated into the shell.
+          PR_TITLE: ${{ github.event.pull_request.user.type != 'Bot' && github.event.pull_request.title || '' }}
+          PR_BODY: ${{ github.event.pull_request.user.type != 'Bot' && github.event.pull_request.body || '' }}
+        run: ci/run.sh noai
+
+  zizmor:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh zizmor
+        env:
+          CI_TOOLS: ${{ runner.temp }}
+
+  gitleaks:
+    name: Gitleaks (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: ci/run.sh gitleaks
+        env:
+          CI_TOOLS: ${{ runner.temp }}
+
+  # The Rust jobs run in the Debian 13 image (docker/Dockerfile.debian), with
+  # validity-rs cloned next to the checkout at the pinned revision.
+  rust:
+    name: ${{ matrix.job }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [fmt, clippy, doc, test, packaging]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Through the environment, not interpolated into the script (zizmor: template-injection).
+      - run: ci/run.sh "$JOB"
+        env:
+          JOB: ${{ matrix.job }}

@@ -1,0 +1,43 @@
+[package]
+name = "fingerprint-settings"
+description = "Manage your own fingerprints with any fprintd-compatible service (net.reactivated.Fprint)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/validity-rs/fingerprint-settings"
+publish = false
+
+[dependencies]
+# The oldest GTK and libadwaita supported are Debian 13's (GTK 4.18, libadwaita
+# 1.7): the feature flags match them, nothing newer.
+adw = { package = "libadwaita", version = "0.9.2", features = ["v1_7"] }
+futures-core = "0.3.34"
+gtk = { package = "gtk4", version = "0.11.5", features = ["v4_18"] }
+# The D-Bus side runs on a thread of its own, driven by zbus::block_on.
+zbus = { version = "6.1.0", default-features = false, features = ["default-rt", "proxy"] }
+# A runtime-agnostic channel between the GTK main loop and the D-Bus thread,
+# and the deadlines of the calls (zbus's own runtime).
+zruntime = { version = "0.2.1", default-features = false, features = ["mpmc", "runtime"] }
+
+[dev-dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["user"] }
+# The fprintd-compatible daemon with its emulated sensor, for the end-to-end
+# test. A path dependency on a validity-rs checkout next to this one until
+# validity-rs is published; CI clones it there (see ci/run.sh).
+validity-daemon = { path = "../validity-rs/crates/validity-daemon" }
+zbus = { version = "6.1.0", default-features = false, features = ["default-rt", "proxy", "service"] }
+zruntime = { version = "0.2.1", default-features = false, features = ["mpmc", "runtime", "helper"] }
+
+[lints.rust]
+# No warning is tolerated: a plain `cargo build/test/clippy/doc` fails on any.
+warnings = "deny"
+unsafe_code = "forbid"
+missing_debug_implementations = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[lints.rustdoc]
+all = { level = "deny", priority = -1 }
