@@ -9,15 +9,18 @@
 //! - [`status`]: fprintd's enrolment and verification results and what to
 //!   tell the user about each.
 //! - [`error`]: service errors in plain language.
-//! - [`fingers`]: finger names.
+//! - [`fingers`]: finger names and the order slots are offered in.
+//! - [`labels`]: the names the user gives their fingerprints, kept in their
+//!   configuration (fprintd only knows ten finger slots).
 //! - [`message`], [`i18n`]: user-visible text and its translations.
 //!
-//! The GTK interface lives in the binary (`src/main.rs`, `src/ui/`).
+//! The GTK interface lives in the binary (`src/main.rs`, `src/ui.rs`).
 
 pub mod error;
 pub mod fingers;
 pub mod fprint;
 pub mod i18n;
+pub mod labels;
 pub mod machine;
 pub mod message;
 pub mod status;

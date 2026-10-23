@@ -534,7 +534,10 @@ mod tests {
         m.update(Input::AddFinger);
         let start = Command::EnrollStart(Finger::RightThumb);
         assert_eq!(
-            m.update(Input::ChooseFinger(Finger::RightThumb)),
+            m.update(Input::StartEnroll {
+                finger: Some(Finger::RightThumb),
+                label: None,
+            }),
             [Command::Claim]
         );
         assert_eq!(

@@ -5,7 +5,8 @@
 //! into the GLib main loop.
 //!
 //! Accessibility: every control has a visible text label (no icon-only
-//! button), screen readers get the finger name with each "Remove" button,
+//! button), screen readers get the fingerprint's name with each "Rename" and
+//! "Remove" button, the add page's selection has a check mark,
 //! instructions and results are announced when they change, every action is
 //! reachable with the keyboard (Tab, Enter, Escape to cancel or go back),
 //! and nothing is told by colour alone: results carry an icon *and* words.
@@ -16,13 +17,14 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use fingerprint_settings::APP_ID;
 use fingerprint_settings::error::{ErrorKind, ServiceError};
-use fingerprint_settings::fingers::{Finger, Hand};
+use fingerprint_settings::fingers::{self, Finger};
 use fingerprint_settings::fprint::{Bus, Service};
 use fingerprint_settings::i18n::{tr, trf};
+use fingerprint_settings::labels::Store;
 use fingerprint_settings::machine::{
     Dialog, EnrollOutcome, Failure, Input, Model, Page, TestOutcome,
 };
-use fingerprint_settings::message::{Arg, Message, msg};
+use fingerprint_settings::message::{Message, msg};
 use gtk::{gdk, glib};
 
 /// Larger text than the desktop default, for readability; the instruction
@@ -31,6 +33,7 @@ const CSS: &str = "
 window.fingerprint-settings { font-size: 1.15em; }
 .instruction { font-size: 1.6em; font-weight: bold; }
 .big-button { font-size: 1.1em; min-height: 44px; padding-left: 28px; padding-right: 28px; }
+.choice { font-size: 1.15em; min-height: 56px; }
 progressbar.big trough, progressbar.big progress { min-height: 14px; }
 ";
 
@@ -154,6 +157,53 @@ impl Details {
     }
 }
 
+/// One choice of the add page: a toggle button with a check mark (shown
+/// when selected, so that the selection is not told by its shade alone)
+/// and its text.
+struct Choice {
+    /// The finger, or `None` for "just a name, any finger".
+    finger: Option<Finger>,
+    button: gtk::ToggleButton,
+    text: gtk::Label,
+}
+
+impl Choice {
+    fn new(finger: Option<Finger>, text: &str) -> Self {
+        let check = gtk::Image::from_icon_name(OK_ICON);
+        check.set_visible(false);
+        check.set_accessible_role(gtk::AccessibleRole::Presentation);
+        // Wraps only when the button is too narrow for the text.
+        let label = gtk::Label::builder()
+            .label(text)
+            .wrap(true)
+            .natural_wrap_mode(gtk::NaturalWrapMode::None)
+            .justify(gtk::Justification::Center)
+            .build();
+        let inner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        inner.set_halign(gtk::Align::Center);
+        inner.append(&check);
+        inner.append(&label);
+        let button = gtk::ToggleButton::builder()
+            .child(&inner)
+            .hexpand(true)
+            .build();
+        button.add_css_class("choice");
+        set_accessible_label(&button, text);
+        let c = check.clone();
+        button.connect_toggled(move |b| c.set_visible(b.is_active()));
+        Choice {
+            finger,
+            button,
+            text: label,
+        }
+    }
+
+    fn set_text(&self, text: &str) {
+        self.text.set_label(text);
+        set_accessible_label(&self.button, text);
+    }
+}
+
 struct Widgets {
     window: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
@@ -171,7 +221,11 @@ struct Widgets {
     fingers_test: gtk::Button,
     reader: gtk::Label,
 
-    choose_rows: Vec<(Finger, adw::ActionRow, gtk::Image)>,
+    /// The add page's choices: a finger, or `None` for "just a name".
+    add_choices: Vec<Choice>,
+    add_others: gtk::Expander,
+    add_name: gtk::Entry,
+    add_start: gtk::Button,
 
     enroll_title: gtk::Label,
     enroll_instruction: gtk::Label,
@@ -194,8 +248,15 @@ struct Ui {
     w: Widgets,
     /// The page shown, by name.
     shown: Cell<&'static str>,
-    /// The fingers the list shows, to rebuild it only when they change.
-    listed: RefCell<Option<Vec<Finger>>>,
+    /// The fingers and names the list shows, to rebuild it only on change.
+    listed: RefCell<Option<(Vec<Finger>, fingerprint_settings::labels::Labels)>>,
+    /// Where the names are kept (`None`: no home directory).
+    store: RefCell<Option<Store>>,
+    /// The add page's name was typed by the user: choosing another finger
+    /// no longer replaces it.
+    name_edited: Cell<bool>,
+    /// The add page is being filled in by the program, not the user.
+    filling: Cell<bool>,
     /// The last instruction or result announced.
     announced: RefCell<String>,
     /// What the result page shows, to rebuild its buttons only on change.
@@ -210,12 +271,27 @@ impl Ui {
     fn new(app: &adw::Application) -> Rc<Ui> {
         let service = Service::start(Bus::System).ok();
         let w = Self::build(app);
+        // The names: a missing or broken file is no names, and a warning.
+        let mut store = Store::from_env();
+        let labels = match store.as_mut() {
+            Some(s) => {
+                let loaded = s.load();
+                for warning in &loaded.warnings {
+                    glib::g_warning!("fingerprint-settings", "{warning}");
+                }
+                loaded.labels
+            }
+            None => Default::default(),
+        };
         let ui = Rc::new(Ui {
-            model: RefCell::new(Model::new()),
+            model: RefCell::new(Model::with_labels(labels)),
             service,
             w,
             shown: Cell::new(""),
             listed: RefCell::new(None),
+            store: RefCell::new(store),
+            name_edited: Cell::new(false),
+            filling: Cell::new(false),
             announced: RefCell::new(String::new()),
             result_key: RefCell::new(String::new()),
             dialog: RefCell::new(None),
@@ -273,7 +349,7 @@ impl Ui {
             ))
             .build();
         let eb = vbox(24);
-        let empty_add = button(tr("Add a finger"), true);
+        let empty_add = button(tr("Add a fingerprint"), true);
         eb.append(&empty_add);
         eb.append(&label(
             tr("Your password always keeps working: you can still use it at any time."),
@@ -289,7 +365,7 @@ impl Ui {
         fb.set_margin_start(18);
         fb.set_margin_end(18);
         let fingers_group = adw::PreferencesGroup::builder()
-            .title(tr("Your registered fingers"))
+            .title(tr("Your fingerprints"))
             .description(tr(
                 "Touch the reader with one of these fingers to unlock the computer.",
             ))
@@ -297,7 +373,7 @@ impl Ui {
         fb.append(&fingers_group);
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         actions.set_halign(gtk::Align::Center);
-        let fingers_add = button(tr("Add a finger"), true);
+        let fingers_add = button(tr("Add a fingerprint"), true);
         let fingers_test = button(tr("Test a finger"), false);
         actions.append(&fingers_add);
         actions.append(&fingers_test);
@@ -310,39 +386,73 @@ impl Ui {
         fb.append(&reader);
         stack.add_named(&clamped(&fb), Some("fingers"));
 
-        // Choosing a finger.
-        let cb = vbox(18);
-        cb.set_margin_top(24);
-        cb.set_margin_bottom(24);
-        cb.set_margin_start(18);
-        cb.set_margin_end(18);
-        cb.append(&label(tr("Which finger do you want to add?"), &["title-2"]));
-        cb.append(&label(
-            tr("Choose a finger that is easy to place on the reader, such as an index finger."),
+        // Adding a fingerprint: which finger, and its name.
+        let ab = vbox(18);
+        ab.set_margin_top(24);
+        ab.set_margin_bottom(24);
+        ab.set_margin_start(18);
+        ab.set_margin_end(18);
+        ab.append(&label(tr("Add a fingerprint"), &["title-2"]));
+        ab.append(&label(
+            tr("Which finger? An index or a thumb is the easiest."),
             &[],
         ));
-        let mut choose_rows = Vec::new();
-        for hand in Hand::ALL {
-            let g = adw::PreferencesGroup::builder()
-                .title(tr(hand.name()))
+        let mut add_choices: Vec<Choice> = Vec::new();
+        let grid = |cols: usize, fingers: &[Finger], out: &mut Vec<Choice>| {
+            let g = gtk::Grid::builder()
+                .column_spacing(12)
+                .row_spacing(12)
+                .column_homogeneous(true)
                 .build();
-            for f in hand.fingers() {
-                let row = adw::ActionRow::builder()
-                    .title(tr(f.name()))
-                    .activatable(true)
-                    .build();
-                let mark = gtk::Image::from_icon_name("go-next-symbolic");
-                mark.set_accessible_role(gtk::AccessibleRole::Presentation);
-                row.add_suffix(&mark);
-                g.add(&row);
-                choose_rows.push((f, row, mark));
+            for (i, f) in fingers.iter().enumerate() {
+                let c = Choice::new(Some(*f), tr(f.name()));
+                g.attach(&c.button, (i % cols) as i32, (i / cols) as i32, 1, 1);
+                out.push(c);
             }
-            cb.append(&g);
+            g
+        };
+        ab.append(&grid(2, &fingers::COMMON, &mut add_choices));
+        let others_grid = grid(2, &fingers::OTHERS, &mut add_choices);
+        others_grid.set_margin_top(12);
+        let add_others = gtk::Expander::builder()
+            .label(tr("Other finger…"))
+            .child(&others_grid)
+            .build();
+        ab.append(&add_others);
+        let any = Choice::new(None, tr("Just a name, any finger"));
+        ab.append(&any.button);
+        add_choices.push(any);
+        // One choice at a time.
+        let leader = add_choices[0].button.clone();
+        for c in &add_choices[1..] {
+            c.button.set_group(Some(&leader));
         }
-        let choose_back = button(tr("Back"), false);
-        choose_back.set_action_name(Some("win.cancel"));
-        cb.append(&choose_back);
-        stack.add_named(&clamped(&cb), Some("choose"));
+        let name_label = label(tr("Name"), &["heading"]);
+        name_label.set_xalign(0.0);
+        name_label.set_margin_top(6);
+        ab.append(&name_label);
+        let add_name = gtk::Entry::builder()
+            .placeholder_text(tr("For example: Thumb, when I'm in bed"))
+            .max_length(fingerprint_settings::labels::MAX_LEN as i32)
+            .build();
+        add_name.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
+            name_label.upcast_ref()
+        ])]);
+        ab.append(&add_name);
+        let hint = label(tr("This is how the fingerprint appears in the list."), &[]);
+        hint.set_xalign(0.0);
+        hint.set_justify(gtk::Justification::Left);
+        ab.append(&hint);
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        buttons.set_halign(gtk::Align::Center);
+        buttons.set_margin_top(6);
+        let add_back = button(tr("Back"), false);
+        add_back.set_action_name(Some("win.cancel"));
+        let add_start = button(tr("Start"), true);
+        buttons.append(&add_back);
+        buttons.append(&add_start);
+        ab.append(&buttons);
+        stack.add_named(&clamped(&ab), Some("add"));
 
         // Enrolling.
         let nb = page_box();
@@ -424,7 +534,10 @@ impl Ui {
             fingers_add,
             fingers_test,
             reader,
-            choose_rows,
+            add_choices,
+            add_others,
+            add_name,
+            add_start,
             enroll_title,
             enroll_instruction,
             enroll_progress,
@@ -458,10 +571,48 @@ impl Ui {
         w.fingers_add.connect_clicked(move |_| f());
         let f = self.on(Input::TestFinger);
         w.fingers_test.connect_clicked(move |_| f());
-        for (finger, row, _) in &w.choose_rows {
-            let f = self.on(Input::ChooseFinger(*finger));
-            row.connect_activated(move |_| f());
+        // The add page: a choice fills in its name, unless the user typed one.
+        for c in &w.add_choices {
+            let weak = Rc::downgrade(self);
+            let choice = c.finger;
+            c.button.connect_toggled(move |b| {
+                let Some(ui) = weak.upgrade() else { return };
+                if b.is_active() && !ui.filling.get() && !ui.name_edited.get() {
+                    ui.fill_name(choice);
+                }
+                ui.update_start();
+            });
         }
+        let weak = Rc::downgrade(self);
+        w.add_name.connect_changed(move |_| {
+            let Some(ui) = weak.upgrade() else { return };
+            if !ui.filling.get() {
+                ui.name_edited.set(true);
+            }
+            ui.update_start();
+        });
+        let weak = Rc::downgrade(self);
+        w.add_name.connect_activate(move |_| {
+            if let Some(ui) = weak.upgrade()
+                && ui.w.add_start.is_sensitive()
+            {
+                ui.w.add_start.emit_clicked();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        w.add_start.connect_clicked(move |_| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(finger) = ui.add_choice() else {
+                return;
+            };
+            let text = ui.w.add_name.text().trim().to_string();
+            // The standard name is not stored: it follows the language.
+            let label = match finger {
+                Some(f) if text.is_empty() || text == tr(f.name()) => None,
+                _ => Some(text),
+            };
+            ui.dispatch(Input::StartEnroll { finger, label });
+        });
 
         // "Cancel" / "Back", also on Escape.
         let cancel = gtk::gio::SimpleAction::new("cancel", None);
@@ -506,9 +657,53 @@ impl Ui {
         });
     }
 
+    /// The add page's selected choice: `Some(Some(finger))`, `Some(None)`
+    /// for "just a name", `None` when nothing is selected.
+    fn add_choice(&self) -> Option<Option<Finger>> {
+        self.w
+            .add_choices
+            .iter()
+            .find(|c| c.button.is_active())
+            .map(|c| c.finger)
+    }
+
+    /// Puts the standard name of `choice` in the name field.
+    fn fill_name(&self, choice: Option<Finger>) {
+        self.filling.set(true);
+        self.w
+            .add_name
+            .set_text(choice.map(|f| tr(f.name())).unwrap_or_default());
+        self.filling.set(false);
+    }
+
+    /// "Start" needs a free finger, or a name when there is no finger.
+    fn update_start(&self) {
+        let ok = match self.add_choice() {
+            Some(Some(f)) => !self.model.borrow().is_enrolled(f),
+            Some(None) => !self.w.add_name.text().trim().is_empty(),
+            None => false,
+        };
+        self.w.add_start.set_sensitive(ok);
+    }
+
     /// Applies `input`, sends the resulting calls, shows the result.
     fn dispatch(self: &Rc<Self>, input: Input) {
         let cmds = self.model.borrow_mut().update(input);
+        let to_save = self.model.borrow_mut().take_labels_to_save();
+        if let Some(labels) = to_save {
+            let saved = match self.store.borrow_mut().as_mut() {
+                Some(store) => store
+                    .save(&labels)
+                    .map_err(|e| format!("{}: {e}", store.path().display())),
+                None => Err("no configuration directory (HOME is not set)".to_string()),
+            };
+            if let Err(e) = saved {
+                glib::g_warning!("fingerprint-settings", "the names were not saved: {e}");
+                self.w.toasts.add_toast(adw::Toast::new(&text(&msg(
+                    "The names could not be saved.",
+                ))));
+            }
+        }
         match &self.service {
             Some(s) => cmds.into_iter().for_each(|c| s.send(c)),
             None if !cmds.is_empty() => {
@@ -544,13 +739,13 @@ impl Ui {
                 self.render_fingers(&m);
                 "fingers"
             }
-            Page::Choose => {
-                self.render_choose(&m);
-                "choose"
+            Page::Add => {
+                self.render_add(&m, self.shown.get() != "add");
+                "add"
             }
             Page::Enroll(e) => match &e.outcome {
                 Some(o) if e.step == fingerprint_settings::machine::Step::Done => {
-                    self.render_enroll_result(e.finger, o, &m);
+                    self.render_enroll_result(e, o, &m);
                     "result"
                 }
                 _ => {
@@ -571,7 +766,7 @@ impl Ui {
             },
             Page::Test(t) => match &t.outcome {
                 Some(o) if t.step == fingerprint_settings::machine::Step::Done => {
-                    self.render_test_result(o);
+                    self.render_test_result(o, &m);
                     "result"
                 }
                 _ => {
@@ -590,7 +785,7 @@ impl Ui {
         if let Some(n) = notice {
             self.w.toasts.add_toast(adw::Toast::new(&text(&n)));
         }
-        self.render_dialog(m.dialog.as_ref());
+        self.render_dialog(m.dialog.as_ref(), &m);
     }
 
     /// Puts the keyboard focus on the page's main control.
@@ -606,10 +801,8 @@ impl Ui {
             "fingers" => {
                 w.fingers_add.grab_focus();
             }
-            "choose" => {
-                if let Some((_, row, _)) = w.choose_rows.iter().find(|(_, r, _)| r.is_sensitive()) {
-                    row.grab_focus();
-                }
+            "add" => {
+                w.add_start.grab_focus();
             }
             "enroll" => {
                 w.enroll_cancel.grab_focus();
@@ -656,29 +849,43 @@ impl Ui {
             w.reader
                 .set_label(&trf("Fingerprint reader: {name}", &[("name", name)]));
         }
-        if self.listed.borrow().as_ref() == Some(&m.fingers) {
+        let key = (m.fingers.clone(), m.labels.clone());
+        if self.listed.borrow().as_ref() == Some(&key) {
             return;
         }
-        *self.listed.borrow_mut() = Some(m.fingers.clone());
+        *self.listed.borrow_mut() = Some(key);
         for row in w.fingers_rows.borrow_mut().drain(..) {
             w.fingers_group.remove(&row);
         }
         for f in &m.fingers {
-            // Not a Tab stop of its own: it does nothing; its button does.
+            // Not a Tab stop of its own: it does nothing; its buttons do.
+            // A name the user typed: plain text, never markup.
             let row = adw::ActionRow::builder()
-                .title(tr(f.name()))
+                .title(m.display_name(*f).text())
+                .use_markup(false)
                 .focusable(false)
                 .build();
             let icon = gtk::Image::from_icon_name(FINGER_ICON);
             icon.set_accessible_role(gtk::AccessibleRole::Presentation);
             row.add_prefix(&icon);
+            let rename = gtk::Button::builder()
+                .label(tr("Rename"))
+                .valign(gtk::Align::Center)
+                .build();
+            set_accessible_label(
+                &rename,
+                &text(&msg("Rename: {name}").with("name", m.display_name(*f))),
+            );
+            let handler = self.on(Input::RenameFinger(*f));
+            rename.connect_clicked(move |_| handler());
+            row.add_suffix(&rename);
             let remove = gtk::Button::builder()
                 .label(tr("Remove"))
                 .valign(gtk::Align::Center)
                 .build();
             set_accessible_label(
                 &remove,
-                &text(&msg("Remove: {finger}").with("finger", Arg::Finger(*f))),
+                &text(&msg("Remove: {name}").with("name", m.display_name(*f))),
             );
             let handler = self.on(Input::RemoveFinger(*f));
             remove.connect_clicked(move |_| handler());
@@ -688,21 +895,35 @@ impl Ui {
         }
     }
 
-    fn render_choose(&self, m: &Model) {
-        for (f, row, mark) in &self.w.choose_rows {
-            let enrolled = m.is_enrolled(*f);
-            row.set_sensitive(!enrolled);
-            row.set_subtitle(if enrolled {
-                tr("Already registered")
+    /// The add page. `entering`: the page was just opened, so it starts
+    /// afresh on the first free finger (indexes and thumbs first).
+    fn render_add(&self, m: &Model, entering: bool) {
+        for c in &self.w.add_choices {
+            let Some(f) = c.finger else { continue };
+            let enrolled = m.is_enrolled(f);
+            c.button.set_sensitive(!enrolled);
+            // Said in words, not only by the greyed-out look.
+            let label = if enrolled {
+                format!("{}\n{}", tr(f.name()), tr("Already registered"))
             } else {
-                ""
-            });
-            mark.set_icon_name(Some(if enrolled {
-                OK_ICON
-            } else {
-                "go-next-symbolic"
-            }));
+                tr(f.name()).to_string()
+            };
+            c.set_text(&label);
         }
+        if entering {
+            let first = m.default_choice();
+            self.filling.set(true);
+            if let Some(c) = self.w.add_choices.iter().find(|c| c.finger == first) {
+                c.button.set_active(true);
+            }
+            self.filling.set(false);
+            self.fill_name(first);
+            self.name_edited.set(false);
+            self.w
+                .add_others
+                .set_expanded(first.is_some_and(|f| !fingers::COMMON.contains(&f)));
+        }
+        self.update_start();
     }
 
     /// Fills the result page: icon, title, text, and the buttons (rebuilt
@@ -741,18 +962,24 @@ impl Ui {
         }
     }
 
-    fn render_enroll_result(self: &Rc<Self>, finger: Finger, o: &EnrollOutcome, m: &Model) {
+    fn render_enroll_result(
+        self: &Rc<Self>,
+        e: &fingerprint_settings::machine::Enroll,
+        o: &EnrollOutcome,
+        m: &Model,
+    ) {
         let back = (msg("Back to my fingerprints"), Input::Cancel, false);
         match o {
             EnrollOutcome::Completed => {
                 let mut buttons = vec![(msg("Test a finger"), Input::TestFinger, true)];
                 if m.fingers.len() < Finger::ALL.len() {
-                    buttons.push((msg("Add another finger"), Input::AddFinger, false));
+                    buttons.push((msg("Add another fingerprint"), Input::AddFinger, false));
                 }
                 buttons.push(back);
                 self.show_result(
                     OK_ICON,
-                    &msg("Your {finger} is registered").with("finger", Arg::FingerInSentence(finger)),
+                    &msg("The fingerprint \u{201c}{name}\u{201d} is registered")
+                        .with("name", e.name()),
                     &msg("You can now touch the reader instead of typing your password. Your password still works too."),
                     None,
                     &buttons,
@@ -777,8 +1004,8 @@ impl Ui {
         }
     }
 
-    fn render_test_result(self: &Rc<Self>, o: &TestOutcome) {
-        let Some((title, body)) = o.texts() else {
+    fn render_test_result(self: &Rc<Self>, o: &TestOutcome, m: &Model) {
+        let Some((title, body)) = o.texts(&m.labels) else {
             return;
         };
         let back = (msg("Back to my fingerprints"), Input::Cancel, false);
@@ -797,7 +1024,7 @@ impl Ui {
         );
     }
 
-    fn render_dialog(self: &Rc<Self>, want: Option<&Dialog>) {
+    fn render_dialog(self: &Rc<Self>, want: Option<&Dialog>, m: &Model) {
         let current = self.dialog.borrow().as_ref().map(|(d, _)| d.clone());
         if current.as_ref() == want {
             return;
@@ -810,8 +1037,22 @@ impl Ui {
         let Some(want) = want else {
             return;
         };
-        let (title, body, ok, cancel) = want.texts();
+        let (title, body, ok, cancel) = want.texts(&m.labels);
         let d = adw::AlertDialog::new(Some(&text(&title)), Some(&text(&body)));
+        // Renaming: a text field with the current name, Enter confirms.
+        let entry = match want {
+            Dialog::Rename(f) => {
+                let e = gtk::Entry::builder()
+                    .text(m.display_name(*f).text())
+                    .activates_default(true)
+                    .max_length(fingerprint_settings::labels::MAX_LEN as i32)
+                    .build();
+                set_accessible_label(&e, tr("Name"));
+                d.set_extra_child(Some(&e));
+                Some((*f, e))
+            }
+            _ => None,
+        };
         if let Some(c) = &cancel {
             d.add_response("cancel", &text(c));
             d.set_close_response("cancel");
@@ -825,7 +1066,7 @@ impl Ui {
                 // The safe choice is the default.
                 d.set_default_response(Some("cancel"));
             }
-            Dialog::Error(_) => d.set_default_response(Some("ok")),
+            Dialog::Rename(_) | Dialog::Error(_) => d.set_default_response(Some("ok")),
         }
         let weak: Weak<Ui> = Rc::downgrade(self);
         let shown = want.clone();
@@ -836,7 +1077,12 @@ impl Ui {
                 return;
             }
             ui.dialog.borrow_mut().take();
-            let input = if response == "ok" {
+            let input = if let (Some((f, e)), "ok") = (&entry, response) {
+                let t = e.text().trim().to_string();
+                // Empty, or the standard name: back to the standard name.
+                let label = (!t.is_empty() && t != tr(f.name())).then_some(t);
+                Input::SetLabel(*f, label)
+            } else if response == "ok" {
                 Input::Confirm
             } else {
                 Input::Dismiss

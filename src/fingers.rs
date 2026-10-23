@@ -125,6 +125,45 @@ impl Finger {
     }
 }
 
+/// The fingers in the order the application offers them: the ones people
+/// use (indexes, then thumbs), then the others.
+pub const PREFERRED: [Finger; 10] = [
+    Finger::RightIndex,
+    Finger::LeftIndex,
+    Finger::RightThumb,
+    Finger::LeftThumb,
+    Finger::RightMiddle,
+    Finger::LeftMiddle,
+    Finger::RightRing,
+    Finger::LeftRing,
+    Finger::RightLittle,
+    Finger::LeftLittle,
+];
+
+/// The four fingers offered first, as big buttons.
+pub const COMMON: [Finger; 4] = [
+    Finger::RightIndex,
+    Finger::LeftIndex,
+    Finger::RightThumb,
+    Finger::LeftThumb,
+];
+
+/// The six others, behind "Other finger…".
+pub const OTHERS: [Finger; 6] = [
+    Finger::RightMiddle,
+    Finger::LeftMiddle,
+    Finger::RightRing,
+    Finger::LeftRing,
+    Finger::RightLittle,
+    Finger::LeftLittle,
+];
+
+/// The first finger of [`PREFERRED`] not in `enrolled`: the slot a
+/// fingerprint gets when the user names it without choosing a finger.
+pub fn free_slot(enrolled: &[Finger]) -> Option<Finger> {
+    PREFERRED.into_iter().find(|f| !enrolled.contains(f))
+}
+
 /// Parses fprintd's list of enrolled fingers: known names only, each once,
 /// in [`Finger::ALL`] order. Unknown names (a newer service) are skipped.
 pub fn parse_enrolled<S: AsRef<str>>(names: &[S]) -> Vec<Finger> {
@@ -228,6 +267,32 @@ mod tests {
         d.sort();
         d.dedup();
         assert_eq!(d.len(), 10);
+    }
+
+    #[test]
+    fn slot_order() {
+        // Every finger once; COMMON then OTHERS is PREFERRED.
+        let mut all = PREFERRED.to_vec();
+        all.sort();
+        assert_eq!(all, Finger::ALL);
+        let joined: Vec<Finger> = COMMON.iter().chain(OTHERS.iter()).copied().collect();
+        assert_eq!(joined, PREFERRED);
+        // Indexes, then thumbs, then the others.
+        assert_eq!(free_slot(&[]), Some(Finger::RightIndex));
+        assert_eq!(free_slot(&[Finger::RightIndex]), Some(Finger::LeftIndex));
+        assert_eq!(
+            free_slot(&[Finger::RightIndex, Finger::LeftIndex]),
+            Some(Finger::RightThumb)
+        );
+        assert_eq!(free_slot(&COMMON), Some(Finger::RightMiddle));
+        assert_eq!(free_slot(&[Finger::LeftIndex]), Some(Finger::RightIndex));
+        // Filling the slots one by one follows PREFERRED exactly.
+        let mut taken = Vec::new();
+        while let Some(f) = free_slot(&taken) {
+            taken.push(f);
+        }
+        assert_eq!(taken, PREFERRED);
+        assert_eq!(free_slot(&Finger::ALL), None);
     }
 
     #[test]

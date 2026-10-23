@@ -332,6 +332,7 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "nix",
+ "toml",
  "validity-daemon",
  "zbus",
  "zruntime",

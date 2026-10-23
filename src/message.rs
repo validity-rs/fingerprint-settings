@@ -13,6 +13,30 @@ pub enum Arg {
     Finger(Finger),
     /// A finger inside a sentence ("your right index finger").
     FingerInSentence(Finger),
+    /// Text shown as it is: a name the user gave.
+    Text(String),
+}
+
+impl Arg {
+    /// The value in the language of `cat`.
+    pub fn render(&self, cat: &Catalogue) -> String {
+        match self {
+            Arg::Number(n) => n.to_string(),
+            Arg::Finger(f) => cat.get(f.name()).to_string(),
+            Arg::FingerInSentence(f) => in_sentence(cat.get(f.name())),
+            Arg::Text(t) => t.clone(),
+        }
+    }
+
+    /// The value in the active language.
+    pub fn text(&self) -> String {
+        match self {
+            Arg::Number(n) => n.to_string(),
+            Arg::Finger(f) => i18n::tr(f.name()).to_string(),
+            Arg::FingerInSentence(f) => in_sentence(i18n::tr(f.name())),
+            Arg::Text(t) => t.clone(),
+        }
+    }
 }
 
 /// A message to show: the msgid and its arguments.
@@ -45,14 +69,7 @@ impl Message {
         let values: Vec<(&str, String)> = self
             .args
             .iter()
-            .map(|(name, arg)| {
-                let v = match arg {
-                    Arg::Number(n) => n.to_string(),
-                    Arg::Finger(f) => cat.get(f.name()).to_string(),
-                    Arg::FingerInSentence(f) => in_sentence(cat.get(f.name())),
-                };
-                (*name, v)
-            })
+            .map(|(name, arg)| (*name, arg.render(cat)))
             .collect();
         let refs: Vec<(&str, &str)> = values.iter().map(|(n, v)| (*n, v.as_str())).collect();
         i18n::fill(cat.get(self.id), &refs)
@@ -63,14 +80,7 @@ impl Message {
         let values: Vec<(&str, String)> = self
             .args
             .iter()
-            .map(|(name, arg)| {
-                let v = match arg {
-                    Arg::Number(n) => n.to_string(),
-                    Arg::Finger(f) => i18n::tr(f.name()).to_string(),
-                    Arg::FingerInSentence(f) => in_sentence(i18n::tr(f.name())),
-                };
-                (*name, v)
-            })
+            .map(|(name, arg)| (*name, arg.text()))
             .collect();
         let refs: Vec<(&str, &str)> = values.iter().map(|(n, v)| (*n, v.as_str())).collect();
         i18n::fill(i18n::tr(self.id), &refs)
@@ -101,7 +111,7 @@ mod tests {
             s.render(&Catalogue::builtin("fr").unwrap()),
             "Étape 2 sur 6"
         );
-        let r = msg("Recognised: {finger}").with("finger", Arg::Finger(Finger::LeftThumb));
+        let r = msg("Recognised: {name}").with("name", Arg::Finger(Finger::LeftThumb));
         assert_eq!(r.render(&Catalogue::default()), "Recognised: Left thumb");
         assert_eq!(
             r.render(&Catalogue::builtin("fr").unwrap()),
@@ -109,5 +119,15 @@ mod tests {
         );
         // The active language is English in unit tests (never initialised).
         assert_eq!(r.text(), "Recognised: Left thumb");
+        // Free text is shown as it is, in every language.
+        let t = Arg::Text("Pouce, quand je suis au lit".into());
+        assert_eq!(t.text(), "Pouce, quand je suis au lit");
+        assert_eq!(t.render(&Catalogue::builtin("fr").unwrap()), t.text());
+        assert_eq!(Arg::Number(3).text(), "3");
+        assert_eq!(Arg::Finger(Finger::RightThumb).text(), "Right thumb");
+        assert_eq!(
+            Arg::FingerInSentence(Finger::RightThumb).render(&Catalogue::builtin("fr").unwrap()),
+            "pouce droit"
+        );
     }
 }

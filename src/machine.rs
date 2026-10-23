@@ -13,9 +13,16 @@
 //! (cancel, failure, error), unless the service itself went away. A Claim
 //! that timed out is released too: the service may have claimed the device
 //! after the application stopped waiting.
+//!
+//! The model also owns the names the user gave their fingerprints
+//! ([`Model::labels`]). A name follows its slot: it is set when an
+//! enrolment completes or on rename, and dropped when the fingerprint is
+//! removed or no longer listed. The model does no I/O: the UI saves the names
+//! when [`Model::take_labels_to_save`] returns them.
 
 use crate::error::{ErrorKind, ServiceError};
-use crate::fingers::Finger;
+use crate::fingers::{self, Finger};
+use crate::labels::{self, Labels};
 use crate::message::{Arg, Message, msg};
 use crate::status::{self, EnrollResult, ScanType, VerifyResult};
 
@@ -60,10 +67,23 @@ pub enum Input {
     // ---- the user
     /// Start, or look for the reader again.
     Start,
-    /// "Add a finger".
+    /// "Add a fingerprint": opens the add page.
     AddFinger,
-    /// A finger picked in the list of fingers to add.
-    ChooseFinger(Finger),
+    /// "Start" on the add page: the finger chosen (`None`: "just a name, any
+    /// finger", the application picks a free slot) and the name given
+    /// (`None`: the finger's standard name). Without a finger, a name is
+    /// required.
+    StartEnroll {
+        /// The finger, if the user chose one.
+        finger: Option<Finger>,
+        /// The name, if the user gave one other than the standard name.
+        label: Option<String>,
+    },
+    /// "Rename" on an enrolled fingerprint: opens the rename dialog.
+    RenameFinger(Finger),
+    /// The rename dialog's answer: the new name (`None`: back to the
+    /// finger's standard name).
+    SetLabel(Finger, Option<String>),
     /// "Test a finger".
     TestFinger,
     /// "Remove" on an enrolled finger: asks for confirmation.
@@ -182,8 +202,13 @@ pub enum EnrollOutcome {
 /// The enrolment page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enroll {
-    /// The finger being added.
-    pub finger: Finger,
+    /// The fprintd slot the fingerprint goes into.
+    pub slot: Finger,
+    /// The finger the user chose (`None`: they only gave a name, so the
+    /// instructions do not name a finger).
+    pub finger: Option<Finger>,
+    /// The name it will have (`None`: the slot's standard name).
+    pub label: Option<String>,
     /// The number of good scans needed, when the device says.
     pub stages: Option<u32>,
     /// Good scans so far.
@@ -225,9 +250,17 @@ impl Enroll {
         }
     }
 
+    /// The name it will have, for messages.
+    pub fn name(&self) -> Arg {
+        match &self.label {
+            Some(l) => Arg::Text(l.clone()),
+            None => Arg::Finger(self.slot),
+        }
+    }
+
     /// The page title.
     pub fn title(&self) -> Message {
-        msg("Adding your {finger}").with("finger", Arg::FingerInSentence(self.finger))
+        msg("Adding \u{201c}{name}\u{201d}").with("name", self.name())
     }
 }
 
@@ -245,11 +278,12 @@ pub enum TestOutcome {
 }
 
 impl TestOutcome {
-    /// The result in words: title and explanation.
-    pub fn texts(&self) -> Option<(Message, Message)> {
+    /// The result in words, with the fingerprints' names: title and
+    /// explanation.
+    pub fn texts(&self, labels: &Labels) -> Option<(Message, Message)> {
         Some(match self {
             TestOutcome::Match(Some(f)) => (
-                msg("Recognised: {finger}").with("finger", Arg::Finger(*f)),
+                msg("Recognised: {name}").with("name", name_of(labels, *f)),
                 msg("This finger can unlock the computer."),
             ),
             TestOutcome::Match(None) => (
@@ -310,8 +344,8 @@ pub enum Page {
     Problem(Failure),
     /// The enrolled fingers (or the empty state).
     Fingers,
-    /// Picking a finger to add.
-    Choose,
+    /// Adding a fingerprint: choosing the finger and the name.
+    Add,
     /// Adding a finger.
     Enroll(Enroll),
     /// Testing a finger.
@@ -325,6 +359,9 @@ pub enum Page {
 pub enum Dialog {
     /// "Remove this fingerprint?"
     ConfirmRemove(Finger),
+    /// "Rename this fingerprint": the UI adds the text field, prefilled with
+    /// [`Model::display_name`].
+    Rename(Finger),
     /// The service can only remove every print at once: "Remove all?"
     ConfirmRemoveAll(Finger),
     /// Something failed.
@@ -332,15 +369,22 @@ pub enum Dialog {
 }
 
 impl Dialog {
-    /// Title, body, confirm button label; the cancel button is "Cancel"
-    /// (`None` for an error, which has only "OK").
-    pub fn texts(&self) -> (Message, Message, Message, Option<Message>) {
+    /// Title, body, confirm button label, and the cancel button's ("Cancel";
+    /// `None` for an error, which has only "OK"), with the fingerprints'
+    /// names.
+    pub fn texts(&self, labels: &Labels) -> (Message, Message, Message, Option<Message>) {
         match self {
             Dialog::ConfirmRemove(f) => (
                 msg("Remove this fingerprint?"),
-                msg("Your {finger} will no longer unlock this computer. You can add it again later.")
-                    .with("finger", Arg::FingerInSentence(*f)),
+                msg("\u{201c}{name}\u{201d} will no longer unlock this computer. You can add it again later.")
+                    .with("name", name_of(labels, *f)),
                 msg("Remove"),
+                Some(msg("Cancel")),
+            ),
+            Dialog::Rename(_) => (
+                msg("Rename this fingerprint"),
+                msg("Choose a name you will recognise. Leave it empty to use the finger's name."),
+                msg("Rename"),
                 Some(msg("Cancel")),
             ),
             Dialog::ConfirmRemoveAll(_) => (
@@ -367,6 +411,18 @@ pub struct Model {
     pub device: Option<DeviceInfo>,
     /// A short notice to show once ("Fingerprint removed"); the UI takes it.
     pub notice: Option<Message>,
+    /// The names the user gave their fingerprints (see [`labels`]).
+    pub labels: Labels,
+    /// The names changed and should be saved.
+    labels_changed: bool,
+}
+
+/// The name of slot `f`: the user's, else the finger's standard name.
+pub fn name_of(labels: &Labels, f: Finger) -> Arg {
+    match labels.get(&f) {
+        Some(l) => Arg::Text(l.clone()),
+        None => Arg::Finger(f),
+    }
 }
 
 impl Default for Model {
@@ -378,13 +434,52 @@ impl Default for Model {
 impl Model {
     /// The state before [`Input::Start`].
     pub fn new() -> Self {
+        Model::with_labels(Labels::new())
+    }
+
+    /// The state before [`Input::Start`], with the names read from the
+    /// user's configuration.
+    pub fn with_labels(labels: Labels) -> Self {
         Model {
             page: Page::Loading,
             dialog: None,
             fingers: Vec::new(),
             device: None,
             notice: None,
+            labels,
+            labels_changed: false,
         }
+    }
+
+    /// The name of an enrolled fingerprint, for messages.
+    pub fn display_name(&self, f: Finger) -> Arg {
+        name_of(&self.labels, f)
+    }
+
+    /// The names, when they changed since the last call: the UI saves them.
+    pub fn take_labels_to_save(&mut self) -> Option<Labels> {
+        std::mem::take(&mut self.labels_changed).then(|| self.labels.clone())
+    }
+
+    fn set_label(&mut self, f: Finger, label: Option<String>) {
+        let before = self.labels.get(&f).cloned();
+        match label.as_deref().and_then(labels::clean) {
+            Some(l) => {
+                self.labels.insert(f, l);
+            }
+            None => {
+                self.labels.remove(&f);
+            }
+        }
+        if self.labels.get(&f) != before.as_ref() {
+            self.labels_changed = true;
+        }
+    }
+
+    /// The finger the add page selects first: the first free one, indexes
+    /// and thumbs first (`None`: all ten are enrolled).
+    pub fn default_choice(&self) -> Option<Finger> {
+        fingers::free_slot(&self.fingers)
     }
 
     fn scan(&self) -> ScanType {
@@ -399,7 +494,7 @@ impl Model {
             Page::Enroll(e) => e.step != Step::Done,
             Page::Test(t) => t.step != Step::Done,
             Page::Removing(_) => true,
-            Page::Problem(_) | Page::Fingers | Page::Choose => false,
+            Page::Problem(_) | Page::Fingers | Page::Add => false,
         }
     }
 
@@ -411,7 +506,7 @@ impl Model {
             Page::Enroll(e) => e.step != Step::Done,
             Page::Test(t) => t.step != Step::Done,
             Page::Removing(_) => true,
-            Page::Loading | Page::Problem(_) | Page::Fingers | Page::Choose => false,
+            Page::Loading | Page::Problem(_) | Page::Fingers | Page::Add => false,
         }
     }
 
@@ -450,10 +545,10 @@ impl Model {
             Page::Test(t) => self.test(t, input),
             Page::Removing(r) => self.removing(r, input),
             Page::Fingers => self.fingers_page(input),
-            Page::Choose => match input {
-                Input::ChooseFinger(f) if !self.is_enrolled(f) => self.start_enroll(f),
+            Page::Add => match input {
+                Input::StartEnroll { finger, label } => self.choose(finger, label),
                 Input::Cancel => (Page::Fingers, vec![]),
-                _ => (Page::Choose, vec![]),
+                _ => (Page::Add, vec![]),
             },
             Page::Problem(p) => match input {
                 Input::TryAgain => (Page::Loading, vec![Command::Connect]),
@@ -488,11 +583,15 @@ impl Model {
                 v.sort();
                 v.dedup();
                 self.fingers = v;
+                self.forget_unenrolled_labels();
             }
-            Err(e) if e.kind == ErrorKind::NoPrints => self.fingers.clear(),
+            Err(e) if e.kind == ErrorKind::NoPrints => {
+                self.fingers.clear();
+                self.forget_unenrolled_labels();
+            }
             Err(e) => {
                 // A failed list during an operation changes nothing there.
-                if matches!(self.page, Page::Loading | Page::Fingers | Page::Choose) {
+                if matches!(self.page, Page::Loading | Page::Fingers | Page::Add) {
                     self.page = Page::Problem(Failure::service(&e));
                 }
                 return vec![];
@@ -504,7 +603,22 @@ impl Model {
         vec![]
     }
 
+    /// Names of slots that are not enrolled (any more) are dropped: the
+    /// fingerprint was removed elsewhere, or never finished.
+    fn forget_unenrolled_labels(&mut self) {
+        let before = self.labels.len();
+        let fingers = &self.fingers;
+        self.labels.retain(|f, _| fingers.contains(f));
+        if self.labels.len() != before {
+            self.labels_changed = true;
+        }
+    }
+
     fn confirm(&mut self) -> Vec<Command> {
+        // The rename dialog answers with SetLabel, which carries the text.
+        if matches!(self.dialog, Some(Dialog::Rename(_))) {
+            return vec![];
+        }
         // Only from the fingers page: nothing else is running.
         let dialog = self.dialog.take();
         if self.page != Page::Fingers {
@@ -561,11 +675,25 @@ impl Model {
     }
 
     fn fingers_page(&mut self, input: Input) -> (Page, Vec<Command>) {
+        if let Some(Dialog::Rename(f)) = self.dialog
+            && let Input::SetLabel(g, label) = &input
+            && *g == f
+        {
+            self.dialog = None;
+            self.set_label(f, label.clone());
+            self.notice =
+                Some(msg("Fingerprint renamed: {name}").with("name", self.display_name(f)));
+            return (Page::Fingers, vec![]);
+        }
         if self.dialog.is_some() {
             return (Page::Fingers, vec![]);
         }
         match input {
-            Input::AddFinger if self.fingers.len() < Finger::ALL.len() => (Page::Choose, vec![]),
+            Input::AddFinger if self.fingers.len() < Finger::ALL.len() => (Page::Add, vec![]),
+            Input::RenameFinger(f) if self.is_enrolled(f) => {
+                self.dialog = Some(Dialog::Rename(f));
+                (Page::Fingers, vec![])
+            }
             Input::TestFinger if !self.fingers.is_empty() => self.start_test(),
             Input::RemoveFinger(f) if self.is_enrolled(f) => {
                 self.dialog = Some(Dialog::ConfirmRemove(f));
@@ -575,10 +703,32 @@ impl Model {
         }
     }
 
-    fn start_enroll(&self, finger: Finger) -> (Page, Vec<Command>) {
+    /// "Start" on the add page.
+    fn choose(&self, finger: Option<Finger>, label: Option<String>) -> (Page, Vec<Command>) {
+        let label = label.as_deref().and_then(labels::clean);
+        let slot = match finger {
+            Some(f) if !self.is_enrolled(f) => f,
+            // Without a finger, the name is all there is: it is required.
+            None if label.is_some() => match fingers::free_slot(&self.fingers) {
+                Some(f) => f,
+                None => return (Page::Add, vec![]),
+            },
+            _ => return (Page::Add, vec![]),
+        };
+        self.start_enroll(slot, finger, label)
+    }
+
+    fn start_enroll(
+        &self,
+        slot: Finger,
+        finger: Option<Finger>,
+        label: Option<String>,
+    ) -> (Page, Vec<Command>) {
         (
             Page::Enroll(Enroll {
+                slot,
                 finger,
+                label,
                 stages: None,
                 passed: 0,
                 step: Step::Claiming,
@@ -620,8 +770,8 @@ impl Model {
                     return release(e);
                 }
                 e.step = Step::Starting;
-                let finger = e.finger;
-                (Page::Enroll(e), vec![Command::EnrollStart(finger)])
+                let slot = e.slot;
+                (Page::Enroll(e), vec![Command::EnrollStart(slot)])
             }
             (Step::Claiming, Input::Claimed(Err(err))) => {
                 if !e.cancel {
@@ -714,10 +864,12 @@ impl Model {
                 e.step = Step::Done;
                 match e.outcome {
                     Some(EnrollOutcome::Completed) => {
-                        if !self.fingers.contains(&e.finger) {
-                            self.fingers.push(e.finger);
+                        if !self.fingers.contains(&e.slot) {
+                            self.fingers.push(e.slot);
                             self.fingers.sort();
                         }
+                        // The name follows the slot.
+                        self.set_label(e.slot, e.label.clone());
                         (Page::Enroll(e), vec![Command::List])
                     }
                     Some(EnrollOutcome::Cancelled) | None => (Page::Fingers, vec![Command::List]),
@@ -728,11 +880,13 @@ impl Model {
             (Step::Done, Input::TryAgain) => match e.outcome {
                 Some(EnrollOutcome::Failed {
                     duplicate: false, ..
-                }) if !self.is_enrolled(e.finger) => self.start_enroll(e.finger),
+                }) if !self.is_enrolled(e.slot) => {
+                    self.start_enroll(e.slot, e.finger, e.label.clone())
+                }
                 _ => (Page::Enroll(e), vec![]),
             },
             (Step::Done, Input::AddFinger) if self.fingers.len() < Finger::ALL.len() => {
-                (Page::Choose, vec![])
+                (Page::Add, vec![])
             }
             (Step::Done, Input::TestFinger) if !self.fingers.is_empty() => self.start_test(),
             (_, _) => (Page::Enroll(e), vec![]),
@@ -775,7 +929,8 @@ impl Model {
                     return stop(t);
                 }
                 t.step = Step::Scanning;
-                t.instruction = status::verify_first(t.selected, scan);
+                t.instruction =
+                    status::verify_first(t.selected.map(|f| self.display_name(f)), scan);
                 (Page::Test(t), vec![])
             }
             (Step::Starting, Input::VerifyStarted(Err(err))) => {
@@ -787,7 +942,8 @@ impl Model {
             (Step::Starting | Step::Scanning, Input::VerifyFingerSelected(name)) => {
                 t.selected = Finger::from_fprintd(&name);
                 if t.step == Step::Scanning {
-                    t.instruction = status::verify_first(t.selected, scan);
+                    t.instruction =
+                        status::verify_first(t.selected.map(|f| self.display_name(f)), scan);
                 }
                 (Page::Test(t), vec![])
             }
@@ -884,10 +1040,12 @@ impl Model {
                     } else {
                         self.fingers.retain(|f| *f != r.finger);
                         self.notice = Some(
-                            msg("Fingerprint removed: {finger}")
-                                .with("finger", Arg::Finger(r.finger)),
+                            msg("Fingerprint removed: {name}")
+                                .with("name", self.display_name(r.finger)),
                         );
                     }
+                    // Their names go with them.
+                    self.forget_unenrolled_labels();
                     (Page::Fingers, vec![Command::List])
                 }
                 Some(RemoveResult::NeedsAll) => {

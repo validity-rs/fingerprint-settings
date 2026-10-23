@@ -237,24 +237,30 @@ pub fn unknown_error() -> Message {
     )
 }
 
-/// The first instruction of an enrolment.
-pub fn enroll_first(finger: Finger, scan: ScanType) -> Message {
-    match scan {
-        ScanType::Press => msg("Place your {finger} flat on the reader."),
-        ScanType::Swipe => msg("Slide your {finger} over the reader."),
-    }
-    .with("finger", Arg::FingerInSentence(finger))
-}
-
-/// The first instruction of a test, once the service said which finger it
-/// checks (`None`: any enrolled finger).
-pub fn verify_first(selected: Option<Finger>, scan: ScanType) -> Message {
-    match (selected, scan) {
+/// The first instruction of an enrolment: with the finger when the user
+/// chose one, without when they only gave a name.
+pub fn enroll_first(finger: Option<Finger>, scan: ScanType) -> Message {
+    match (finger, scan) {
         (Some(f), ScanType::Press) => {
-            msg("Place your {finger} on the reader.").with("finger", Arg::FingerInSentence(f))
+            msg("Place your {finger} flat on the reader.").with("finger", Arg::FingerInSentence(f))
         }
         (Some(f), ScanType::Swipe) => {
             msg("Slide your {finger} over the reader.").with("finger", Arg::FingerInSentence(f))
+        }
+        (None, ScanType::Press) => msg("Place your finger flat on the reader."),
+        (None, ScanType::Swipe) => msg("Slide your finger over the reader."),
+    }
+}
+
+/// The first instruction of a test, once the service said which
+/// fingerprint it checks: its name (`None`: any enrolled one).
+pub fn verify_first(selected: Option<Arg>, scan: ScanType) -> Message {
+    match (selected, scan) {
+        (Some(name), ScanType::Press) => {
+            msg("Place the finger \u{201c}{name}\u{201d} on the reader.").with("name", name)
+        }
+        (Some(name), ScanType::Swipe) => {
+            msg("Slide the finger \u{201c}{name}\u{201d} over the reader.").with("name", name)
         }
         (None, ScanType::Press) => msg("Place one of your registered fingers on the reader."),
         (None, ScanType::Swipe) => msg("Slide one of your registered fingers over the reader."),
@@ -461,7 +467,7 @@ mod tests {
     fn first_instructions() {
         let en = Catalogue::default();
         let fr = Catalogue::builtin("fr").unwrap();
-        let m = enroll_first(Finger::RightIndex, ScanType::Press);
+        let m = enroll_first(Some(Finger::RightIndex), ScanType::Press);
         assert_eq!(
             m.render(&en),
             "Place your right index finger flat on the reader."
@@ -470,7 +476,7 @@ mod tests {
             m.render(&fr),
             "Posez votre index droit à plat sur le lecteur."
         );
-        let m = enroll_first(Finger::LeftLittle, ScanType::Swipe);
+        let m = enroll_first(Some(Finger::LeftLittle), ScanType::Swipe);
         assert_eq!(
             m.render(&en),
             "Slide your left little finger over the reader."
@@ -479,13 +485,26 @@ mod tests {
             m.render(&fr),
             "Faites glisser votre petit doigt gauche sur le lecteur."
         );
+        // Only a name: no finger to name.
+        let m = enroll_first(None, ScanType::Press);
+        assert_eq!(m.render(&en), "Place your finger flat on the reader.");
+        assert_eq!(m.render(&fr), "Posez votre doigt à plat sur le lecteur.");
         assert_eq!(
-            verify_first(Some(Finger::RightThumb), ScanType::Press).render(&fr),
-            "Posez votre pouce droit sur le lecteur."
+            enroll_first(None, ScanType::Swipe).render(&fr),
+            "Faites glisser votre doigt sur le lecteur."
+        );
+        let named = Arg::Text("Pouce, quand je suis au lit".into());
+        assert_eq!(
+            verify_first(Some(named.clone()), ScanType::Press).render(&fr),
+            "Posez le doigt «\u{a0}Pouce, quand je suis au lit\u{a0}» sur le lecteur."
         );
         assert_eq!(
-            verify_first(Some(Finger::RightThumb), ScanType::Swipe).render(&en),
-            "Slide your right thumb over the reader."
+            verify_first(Some(named), ScanType::Swipe).render(&en),
+            "Slide the finger \u{201c}Pouce, quand je suis au lit\u{201d} over the reader."
+        );
+        assert_eq!(
+            verify_first(Some(Arg::Finger(Finger::RightThumb)), ScanType::Press).render(&en),
+            "Place the finger \u{201c}Right thumb\u{201d} on the reader."
         );
         assert_eq!(
             verify_first(None, ScanType::Press).render(&en),

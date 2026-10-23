@@ -1,15 +1,20 @@
 # Fingerprints (`fingerprint-settings`)
 
-A small desktop application to manage **your own fingerprints**: register a
-finger, test it, remove it. It is meant for desktops that have no fingerprint
-settings of their own, such as **XFCE, MATE and LXQt**, and for people who
-want something plain and readable.
+A small desktop application to manage **your own fingerprints**: add one,
+name it, test it, remove it. It is meant for desktops that have no
+fingerprint settings of their own, such as **XFCE, MATE and LXQt**, and for
+people who want something plain and readable.
 
-- **Add a finger**: pick a finger, then follow large, plain instructions
-  ("Lift your finger, then place it on the reader again") with a step counter
-  ("Step 3 of 6").
-- **Test a finger**: touch the reader and see "Recognised" or "Not recognised".
-- **Remove a finger**, after a confirmation.
+- **Add a fingerprint**: four big buttons for the fingers people use (right
+  and left index, right and left thumb), the six others behind "Other
+  finger…", or "Just a name, any finger". Then follow large, plain
+  instructions ("Lift your finger, then place it on the reader again") with a
+  step counter ("Step 3 of 6").
+- **Name it** the way you like: "Index droit", or "Thumb, when I'm in bed".
+  The list shows the names, each with **Rename** and **Remove**.
+- **Test a finger**: touch the reader and see "Recognised: Thumb, when I'm in
+  bed" or "Not recognised".
+- **Remove a fingerprint**, after a confirmation.
 - Errors in plain language: no reader, reader busy, not allowed, service not
   available. The technical detail stays folded under "Technical details".
 - The password always keeps working; the application says so.
@@ -44,6 +49,31 @@ authentication agent must be running in the session (XFCE: `xfce-polkit` or
 one, the application says you are not allowed. A call that may show this
 prompt is given ten minutes; any other call one minute, after which the
 application says the service did not answer.
+
+## Where the names are kept
+
+fprintd knows ten finger slots, not names. The names are kept in your own
+configuration, `$XDG_CONFIG_HOME/fingerprint-settings/names.toml` (by default
+`~/.config/fingerprint-settings/names.toml`), keyed by fprintd's finger name:
+
+```toml
+[names]
+left-thumb = "Thumb, when I'm in bed"
+right-index-finger = "Work"
+```
+
+- A fingerprint without a name shows its finger's standard name, in your
+  language. Choosing a finger and keeping its suggested name stores nothing.
+- "Just a name, any finger" puts the fingerprint in the first free slot:
+  right index, left index, right thumb, left thumb, then the others. The
+  instructions then say "your finger" rather than naming one.
+- The name follows the slot: removing a fingerprint removes its name, and
+  names of slots that are no longer enrolled (removed with another tool) are
+  dropped the next time the list is read.
+- The file is written atomically (temporary file, then rename). A missing
+  file means no names. An unreadable or invalid one means the standard names
+  and a warning in the log, never a crash; it is kept as
+  `names.toml.corrupt` the next time a name is saved.
 
 ## Build, run, install
 
@@ -91,14 +121,16 @@ cargo test
 ```
 
 - Unit tests of the UI-free core (`src/machine.rs` and its tests, `status`,
-  `error`, `i18n`, `fingers`): every enrolment and verification result, every
-  error path, cancelling at each step, and the rule that a claimed reader is
-  always released.
+  `error`, `i18n`, `fingers`, `labels`): every enrolment and verification
+  result, every error path, cancelling at each step, the rule that a claimed
+  reader is always released, naming, renaming and slot allocation, and the
+  names file (round trip, corrupt or unreadable file, clean-up).
 - `tests/end_to_end.rs`: the same core and D-Bus driver as the window, against
   validity-rs's daemon with its emulated sensor on a private `dbus-daemon`:
   enrol, list, test, remove, duplicates, cancels, a busy reader, polkit
-  refusals, no service, no reader, the service going away, and an older
-  service without `DeleteEnrolledFinger`.
+  refusals, no service, no reader, the service going away, an older service
+  without `DeleteEnrolledFinger`, a service that never answers, and named
+  fingerprints saved to a real names file.
 - `tests/translations.rs`: every user-visible string has a French
   translation, the catalogue has nothing stale, placeholders and French
   typography are right; the desktop entry and metainfo are translated.
@@ -126,6 +158,9 @@ clippy doc test packaging`. The Rust jobs run in the pinned Debian 13 image
   turns replies and signals into inputs, in bus order.
 - `src/status.rs`, `src/error.rs`: what to tell the user for each fprintd
   result and each error.
+- `src/labels.rs`: the names file. The machine owns the names in memory and
+  says when they changed (`Model::take_labels_to_save`); the window saves
+  them.
 - `src/ui.rs`, `src/main.rs`: the GTK 4 / libadwaita window, which only
   renders the model and forwards clicks.
 
@@ -153,12 +188,16 @@ To add a language, for example German:
 - Large text: the window's text is 15% larger than the desktop's, the
   instruction during enrolment larger still, and the buttons are big.
 - Keyboard: every action is reachable with Tab and Enter; the main button of
-  each page has the focus when the page opens; Escape cancels or goes back;
-  in the confirmation, the safe choice ("Cancel") is the default.
-- Screen readers: every control has a text label; each "Remove" button is
-  named after its finger; instructions and results are announced when they
+  each page has the focus when the page opens ("Start" on the add page, so
+  Enter adds the suggested finger); Escape cancels or goes back; in the
+  removal confirmation, the safe choice ("Cancel") is the default; in the
+  rename dialog, Enter renames.
+- Screen readers: every control has a text label; each "Rename" and "Remove"
+  button is named after its fingerprint; the name field is labelled "Name"; instructions and results are announced when they
   change; the progress bar reads "Step 3 of 6".
-- Nothing is told by colour alone: results have an icon *and* words.
+- Nothing is told by colour alone: results have an icon *and* words; the
+  selected finger on the add page has a check mark, and a finger already
+  registered says so in words.
 - Closing the window during an enrolment or a test stops it and releases the
   reader first.
 

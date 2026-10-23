@@ -51,15 +51,9 @@ msgstr ""
 "Votre mot de passe fonctionne toujours : vous pouvez l'utiliser à tout "
 "moment."
 
-msgid "Your registered fingers"
-msgstr "Vos doigts enregistrés"
-
 msgid "Touch the reader with one of these fingers to unlock the computer."
 msgstr ""
 "Touchez le lecteur avec l'un de ces doigts pour déverrouiller l'ordinateur."
-
-msgid "Add a finger"
-msgstr "Ajouter un doigt"
 
 msgid "Test a finger"
 msgstr "Tester un doigt"
@@ -67,27 +61,14 @@ msgstr "Tester un doigt"
 msgid "Remove"
 msgstr "Supprimer"
 
-msgid "Remove: {finger}"
-msgstr "Supprimer : {finger}"
-
 msgid "Removing the fingerprint…"
 msgstr "Suppression de l'empreinte…"
-
-msgid "Fingerprint removed: {finger}"
-msgstr "Empreinte supprimée : {finger}"
 
 msgid "All your fingerprints were removed."
 msgstr "Toutes vos empreintes ont été supprimées."
 
 msgid "Remove this fingerprint?"
 msgstr "Supprimer cette empreinte ?"
-
-msgid ""
-"Your {finger} will no longer unlock this computer. You can add it again "
-"later."
-msgstr ""
-"Votre {finger} ne pourra plus déverrouiller cet ordinateur. Vous pourrez "
-"l'ajouter de nouveau plus tard."
 
 msgid "Remove all your fingerprints?"
 msgstr "Supprimer toutes vos empreintes ?"
@@ -142,15 +123,6 @@ msgstr "Petit doigt droit"
 
 # ---------------------------------------------------------------- choosing a finger
 
-msgid "Which finger do you want to add?"
-msgstr "Quel doigt voulez-vous ajouter ?"
-
-msgid ""
-"Choose a finger that is easy to place on the reader, such as an index "
-"finger."
-msgstr ""
-"Choisissez un doigt facile à poser sur le lecteur, par exemple un index."
-
 msgid "Already registered"
 msgstr "Déjà enregistré"
 
@@ -158,9 +130,6 @@ msgid "Back"
 msgstr "Retour"
 
 # ---------------------------------------------------------------- enrolment
-
-msgid "Adding your {finger}"
-msgstr "Ajout de votre {finger}"
 
 msgid "Getting the reader ready…"
 msgstr "Préparation du lecteur…"
@@ -223,9 +192,6 @@ msgstr ""
 "Levez et reposez votre doigt plusieurs fois, en le décalant légèrement à "
 "chaque fois."
 
-msgid "Your {finger} is registered"
-msgstr "Votre {finger} est enregistré"
-
 msgid ""
 "You can now touch the reader instead of typing your password. Your password "
 "still works too."
@@ -256,25 +222,16 @@ msgstr ""
 msgid "Choose another finger"
 msgstr "Choisir un autre doigt"
 
-msgid "Add another finger"
-msgstr "Ajouter un autre doigt"
-
 msgid "Back to my fingerprints"
 msgstr "Retour à mes empreintes"
 
 # ---------------------------------------------------------------- testing
-
-msgid "Place your {finger} on the reader."
-msgstr "Posez votre {finger} sur le lecteur."
 
 msgid "Place one of your registered fingers on the reader."
 msgstr "Posez l'un de vos doigts enregistrés sur le lecteur."
 
 msgid "Slide one of your registered fingers over the reader."
 msgstr "Faites glisser l'un de vos doigts enregistrés sur le lecteur."
-
-msgid "Recognised: {finger}"
-msgstr "Reconnu : {finger}"
 
 msgid "This finger can unlock the computer."
 msgstr "Ce doigt peut déverrouiller l'ordinateur."
@@ -388,3 +345,83 @@ msgid ""
 msgstr ""
 "Le service d'empreintes a signalé un problème. Veuillez réessayer. Si cela "
 "se reproduit, redémarrez l'ordinateur."
+
+# ---------------------------------------------------------------- named fingerprints
+
+msgid "Add a fingerprint"
+msgstr "Ajouter une empreinte"
+
+msgid "Add another fingerprint"
+msgstr "Ajouter une autre empreinte"
+
+msgid "Adding “{name}”"
+msgstr "Ajout de « {name} »"
+
+msgid "Choose a name you will recognise. Leave it empty to use the finger's name."
+msgstr "Choisissez un nom qui vous parle. Laissez-le vide pour reprendre le nom du doigt."
+
+msgid "Fingerprint removed: {name}"
+msgstr "Empreinte supprimée : {name}"
+
+msgid "Fingerprint renamed: {name}"
+msgstr "Empreinte renommée : {name}"
+
+msgid "For example: Thumb, when I'm in bed"
+msgstr "Par exemple : Pouce, quand je suis au lit"
+
+msgid "Just a name, any finger"
+msgstr "Juste un nom, n'importe quel doigt"
+
+msgid "Name"
+msgstr "Nom"
+
+msgid "Other finger…"
+msgstr "Autre doigt…"
+
+msgid "Place the finger “{name}” on the reader."
+msgstr "Posez le doigt « {name} » sur le lecteur."
+
+msgid "Place your finger flat on the reader."
+msgstr "Posez votre doigt à plat sur le lecteur."
+
+msgid "Recognised: {name}"
+msgstr "Reconnu : {name}"
+
+msgid "Remove: {name}"
+msgstr "Supprimer : {name}"
+
+msgid "Rename"
+msgstr "Renommer"
+
+msgid "Rename this fingerprint"
+msgstr "Renommer cette empreinte"
+
+msgid "Rename: {name}"
+msgstr "Renommer : {name}"
+
+msgid "Slide the finger “{name}” over the reader."
+msgstr "Faites glisser le doigt « {name} » sur le lecteur."
+
+msgid "Slide your finger over the reader."
+msgstr "Faites glisser votre doigt sur le lecteur."
+
+msgid "Start"
+msgstr "Commencer"
+
+msgid "The fingerprint “{name}” is registered"
+msgstr "L'empreinte « {name} » est enregistrée"
+
+msgid "The names could not be saved."
+msgstr "Les noms n'ont pas pu être enregistrés."
+
+msgid "This is how the fingerprint appears in the list."
+msgstr "C'est sous ce nom que l'empreinte apparaît dans la liste."
+
+msgid "Which finger? An index or a thumb is the easiest."
+msgstr "Quel doigt ? Un index ou un pouce est le plus pratique."
+
+msgid "Your fingerprints"
+msgstr "Vos empreintes"
+
+msgid "“{name}” will no longer unlock this computer. You can add it again later."
+msgstr "« {name} » ne pourra plus déverrouiller cet ordinateur. Vous pourrez l'ajouter de nouveau plus tard."

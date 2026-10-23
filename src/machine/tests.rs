@@ -1,6 +1,14 @@
 use super::*;
 use crate::i18n::Catalogue;
 
+/// "Start" on the add page with this finger and its standard name.
+fn pick(f: Finger) -> Input {
+    Input::StartEnroll {
+        finger: Some(f),
+        label: None,
+    }
+}
+
 fn err(kind: ErrorKind) -> ServiceError {
     ServiceError::new(kind, format!("{kind:?} detail"))
 }
@@ -48,8 +56,8 @@ fn test(m: &Model) -> &Test {
 fn scanning(f: Finger, stages: Option<u32>) -> Model {
     let mut m = ready(&[]);
     assert_eq!(m.update(Input::AddFinger), []);
-    assert_eq!(m.page, Page::Choose);
-    assert_eq!(m.update(Input::ChooseFinger(f)), [Command::Claim]);
+    assert_eq!(m.page, Page::Add);
+    assert_eq!(m.update(pick(f)), [Command::Claim]);
     assert_eq!(enroll(&m).step, Step::Claiming);
     assert_eq!(
         m.update(Input::Claimed(Ok(stages))),
@@ -137,7 +145,7 @@ fn every_connect_error_is_a_problem_page_with_retry() {
             Input::TestFinger,
             Input::Cancel,
             Input::RemoveFinger(Finger::LeftThumb),
-            Input::ChooseFinger(Finger::LeftThumb),
+            pick(Finger::LeftThumb),
         ] {
             assert_eq!(m.update(i), []);
             assert!(matches!(m.page, Page::Problem(_)));
@@ -222,7 +230,7 @@ fn fingers_page_inputs() {
         Input::TryAgain,
         Input::Cancel,
         Input::Confirm,
-        Input::ChooseFinger(Finger::LeftThumb),
+        pick(Finger::LeftThumb),
     ] {
         assert_eq!(m.update(i.clone()), [], "{i:?}");
         assert_eq!(m.page, Page::Fingers, "{i:?}");
@@ -237,25 +245,25 @@ fn fingers_page_inputs() {
 fn chooser_offers_only_new_fingers() {
     let mut m = ready(&[Finger::RightIndex]);
     m.update(Input::AddFinger);
-    assert_eq!(m.page, Page::Choose);
+    assert_eq!(m.page, Page::Add);
     assert!(!m.busy());
-    assert_eq!(m.update(Input::ChooseFinger(Finger::RightIndex)), []);
-    assert_eq!(m.page, Page::Choose);
+    assert_eq!(m.update(pick(Finger::RightIndex)), []);
+    assert_eq!(m.page, Page::Add);
     for i in [Input::TestFinger, Input::Claimed(Ok(None)), Input::TryAgain] {
         assert_eq!(m.update(i), []);
-        assert_eq!(m.page, Page::Choose);
+        assert_eq!(m.page, Page::Add);
     }
     assert_eq!(m.update(Input::Cancel), []);
     assert_eq!(m.page, Page::Fingers);
     m.update(Input::AddFinger);
-    assert_eq!(
-        m.update(Input::ChooseFinger(Finger::LeftIndex)),
-        [Command::Claim]
-    );
+    assert_eq!(m.update(pick(Finger::LeftIndex)), [Command::Claim]);
     let e = enroll(&m);
-    assert_eq!(e.finger, Finger::LeftIndex);
+    assert_eq!(
+        (e.slot, e.finger),
+        (Finger::LeftIndex, Some(Finger::LeftIndex))
+    );
     assert_eq!(en(&e.instruction), "Getting the reader ready…");
-    assert_eq!(en(&e.title()), "Adding your left index finger");
+    assert_eq!(en(&e.title()), "Adding \u{201c}Left index finger\u{201d}");
     assert!(m.busy());
 }
 
@@ -315,7 +323,7 @@ fn enrol_happy_path() {
     assert!(matches!(t.page, Page::Test(_)));
     let mut a = m.clone();
     assert_eq!(a.update(Input::AddFinger), []);
-    assert_eq!(a.page, Page::Choose);
+    assert_eq!(a.page, Page::Add);
     // "Try again" after a success does nothing.
     assert_eq!(m.update(Input::TryAgain), []);
     assert_eq!(enroll(&m).step, Step::Done);
@@ -331,7 +339,7 @@ fn enrol_swipe_wording() {
         },
     );
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     m.update(Input::Claimed(Ok(Some(5))));
     m.update(Input::EnrollStarted(Ok(())));
     assert_eq!(
@@ -481,12 +489,13 @@ fn every_final_enroll_status() {
         } else {
             assert_eq!(c, [Command::Claim], "{s}");
             assert_eq!(enroll(&again).step, Step::Claiming);
-            assert_eq!(enroll(&again).finger, Finger::LeftThumb);
+            assert_eq!(enroll(&again).slot, Finger::LeftThumb);
+            assert_eq!(enroll(&again).finger, Some(Finger::LeftThumb));
             assert!(enroll(&again).outcome.is_none());
         }
         let mut other = m.clone();
         assert_eq!(other.update(Input::AddFinger), []);
-        assert_eq!(other.page, Page::Choose);
+        assert_eq!(other.page, Page::Add);
         // No fingers: nothing to test from here.
         let mut t = m.clone();
         assert_eq!(t.update(Input::TestFinger), []);
@@ -525,7 +534,7 @@ fn enrol_errors_at_each_call() {
         // may have claimed the device after all).
         let mut m = ready(&[]);
         m.update(Input::AddFinger);
-        m.update(Input::ChooseFinger(Finger::RightThumb));
+        m.update(pick(Finger::RightThumb));
         if kind == ErrorKind::Timeout {
             assert_eq!(m.update(Input::Claimed(Err(err(kind)))), [Command::Release]);
             assert_eq!(enroll(&m).step, Step::Releasing);
@@ -548,7 +557,7 @@ fn enrol_errors_at_each_call() {
         // EnrollStart fails: release.
         let mut m = ready(&[]);
         m.update(Input::AddFinger);
-        m.update(Input::ChooseFinger(Finger::RightThumb));
+        m.update(pick(Finger::RightThumb));
         m.update(Input::Claimed(Ok(Some(8))));
         assert_eq!(
             m.update(Input::EnrollStarted(Err(err(kind)))),
@@ -577,7 +586,7 @@ fn enrol_cancel_at_each_step() {
     // While claiming: the claim answer releases.
     let mut m = ready(&[]);
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     assert_eq!(m.update(Input::Cancel), []);
     assert_eq!(enroll(&m).outcome, Some(EnrollOutcome::Cancelled));
     assert_eq!(m.update(Input::Cancel), [], "twice is once");
@@ -588,7 +597,7 @@ fn enrol_cancel_at_each_step() {
     // While claiming, and the claim fails: back, nothing to release.
     let mut m = ready(&[]);
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     m.update(Input::Cancel);
     assert_eq!(m.update(Input::Claimed(Err(err(ErrorKind::Busy)))), []);
     assert_eq!(m.page, Page::Fingers);
@@ -597,7 +606,7 @@ fn enrol_cancel_at_each_step() {
     // While starting: stop once started, then release.
     let mut m = ready(&[]);
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     m.update(Input::Claimed(Ok(Some(6))));
     assert_eq!(m.update(Input::Cancel), []);
     assert_eq!(
@@ -611,7 +620,7 @@ fn enrol_cancel_at_each_step() {
     // While starting, and the start fails: release.
     let mut m = ready(&[]);
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     m.update(Input::Claimed(Ok(Some(6))));
     m.update(Input::Cancel);
     assert_eq!(
@@ -644,7 +653,7 @@ fn enroll_statuses_before_the_start_reply() {
     // An ongoing status before the reply is applied.
     let mut m = ready(&[]);
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     m.update(Input::Claimed(Ok(Some(3))));
     assert_eq!(m.update(status("enroll-stage-passed", false)), []);
     assert_eq!(enroll(&m).passed, 1);
@@ -662,7 +671,7 @@ fn enroll_statuses_before_the_start_reply() {
     // Cancelled while starting, then a final status: still a cancel.
     let mut m = ready(&[]);
     m.update(Input::AddFinger);
-    m.update(Input::ChooseFinger(Finger::LeftThumb));
+    m.update(pick(Finger::LeftThumb));
     m.update(Input::Claimed(Ok(Some(3))));
     m.update(Input::Cancel);
     assert_eq!(m.update(status("enroll-failed", true)), []);
@@ -693,7 +702,7 @@ fn enrol_ignores_stray_inputs() {
         Input::TestFinger,
         Input::TryAgain,
         Input::RemoveFinger(Finger::LeftThumb),
-        Input::ChooseFinger(Finger::RightThumb),
+        pick(Finger::RightThumb),
         Input::Confirm,
     ] {
         assert_eq!(m.update(i.clone()), [], "{i:?}");
@@ -716,7 +725,7 @@ fn test_match_with_a_selected_finger() {
     assert_eq!(m.update(Input::VerifyStarted(Ok(()))), []);
     assert_eq!(
         en(&test(&m).instruction),
-        "Place your right index finger on the reader."
+        "Place the finger \u{201c}Right index finger\u{201d} on the reader."
     );
     assert_eq!(
         m.update(vstatus("verify-match", true)),
@@ -730,7 +739,7 @@ fn test_match_with_a_selected_finger() {
         t.outcome,
         Some(TestOutcome::Match(Some(Finger::RightIndex)))
     );
-    let (title, body) = t.outcome.as_ref().unwrap().texts().unwrap();
+    let (title, body) = t.outcome.as_ref().unwrap().texts(&Labels::new()).unwrap();
     assert_eq!(en(&title), "Recognised: Right index finger");
     assert_eq!(en(&body), "This finger can unlock the computer.");
     let fr = Catalogue::builtin("fr").unwrap();
@@ -757,7 +766,7 @@ fn test_match_with_any_finger_and_no_match() {
     m.update(Input::Released(Ok(())));
     let o = test(&m).outcome.clone().unwrap();
     assert_eq!(o, TestOutcome::Match(None));
-    let (title, body) = o.texts().unwrap();
+    let (title, body) = o.texts(&Labels::new()).unwrap();
     assert_eq!(en(&title), "Recognised");
     assert_eq!(
         en(&body),
@@ -768,7 +777,7 @@ fn test_match_with_any_finger_and_no_match() {
     m.update(Input::VerifyFingerSelected("left-thumb".into()));
     assert_eq!(
         en(&test(&m).instruction),
-        "Place your left thumb on the reader."
+        "Place the finger \u{201c}Left thumb\u{201d} on the reader."
     );
     assert_eq!(
         m.update(vstatus("verify-no-match", true)),
@@ -778,13 +787,13 @@ fn test_match_with_any_finger_and_no_match() {
     m.update(Input::Released(Ok(())));
     let o = test(&m).outcome.clone().unwrap();
     assert_eq!(o, TestOutcome::NoMatch);
-    let (title, body) = o.texts().unwrap();
+    let (title, body) = o.texts(&Labels::new()).unwrap();
     assert_eq!(en(&title), "Not recognised");
     assert_eq!(
         en(&body),
         "This finger is not registered, or it was not placed well. You can try again."
     );
-    assert_eq!(TestOutcome::Cancelled.texts(), None);
+    assert_eq!(TestOutcome::Cancelled.texts(&Labels::new()), None);
 }
 
 #[test]
@@ -860,7 +869,7 @@ fn every_final_verify_status() {
         assert_eq!(t.outcome.as_ref(), Some(&outcome), "{s}");
         if let TestOutcome::Failed(f) = &outcome {
             assert_eq!(en(&f.title), "The test did not work");
-            let (title, _) = outcome.texts().unwrap();
+            let (title, _) = outcome.texts(&Labels::new()).unwrap();
             assert_eq!(title, f.title);
         }
     }
@@ -1064,7 +1073,7 @@ fn remove_falls_back_to_remove_all() {
     assert_eq!(m.update(Input::Released(Ok(()))), []);
     assert_eq!(m.page, Page::Fingers);
     assert_eq!(m.dialog, Some(Dialog::ConfirmRemoveAll(Finger::LeftThumb)));
-    let (title, body, ok, cancel) = m.dialog.as_ref().unwrap().texts();
+    let (title, body, ok, cancel) = m.dialog.as_ref().unwrap().texts(&m.labels);
     assert_eq!(en(&title), "Remove all your fingerprints?");
     assert!(en(&body).starts_with("This fingerprint service can only remove all"));
     assert_eq!(en(&ok), "Remove all");
@@ -1120,7 +1129,7 @@ fn remove_errors() {
         }
         assert_eq!(m.page, Page::Fingers);
         assert_eq!(m.dialog, Some(Dialog::Error(Failure::service(&err(kind)))));
-        let (title, body, ok, cancel) = m.dialog.as_ref().unwrap().texts();
+        let (title, body, ok, cancel) = m.dialog.as_ref().unwrap().texts(&m.labels);
         assert_eq!(title, kind.title());
         assert_eq!(body, kind.description());
         assert_eq!(en(&ok), "OK");
@@ -1149,18 +1158,21 @@ fn remove_errors() {
 #[test]
 fn confirm_dialog_texts() {
     let d = Dialog::ConfirmRemove(Finger::LeftLittle);
-    let (title, body, ok, cancel) = d.texts();
+    let (title, body, ok, cancel) = d.texts(&Labels::new());
     assert_eq!(en(&title), "Remove this fingerprint?");
     assert_eq!(
         en(&body),
-        "Your left little finger will no longer unlock this computer. You can add it again later."
+        "\u{201c}Left little finger\u{201d} will no longer unlock this computer. You can add it again later."
     );
+    // With a name, the name.
+    let named = Labels::from([(Finger::LeftLittle, "Pinky".to_string())]);
+    assert!(en(&d.texts(&named).1).starts_with("\u{201c}Pinky\u{201d} will no longer"));
     assert_eq!(en(&ok), "Remove");
     assert_eq!(en(&cancel.unwrap()), "Cancel");
     let fr = Catalogue::builtin("fr").unwrap();
     assert_eq!(
         body.render(&fr),
-        "Votre petit doigt gauche ne pourra plus déverrouiller cet ordinateur. Vous pourrez l'ajouter de nouveau plus tard."
+        "«\u{a0}Petit doigt gauche\u{a0}» ne pourra plus déverrouiller cet ordinateur. Vous pourrez l'ajouter de nouveau plus tard."
     );
     // Confirm with no dialog, or an error dialog, starts nothing.
     let mut m = ready(&[Finger::LeftThumb]);
@@ -1379,7 +1391,7 @@ fn every_claim_is_released_whatever_happens() {
                     cancel_at,
                     last,
                 };
-                let sim = Sim::run(m, Input::ChooseFinger(Finger::LeftThumb), plan);
+                let sim = Sim::run(m, pick(Finger::LeftThumb), plan);
                 assert!(!sim.claimed, "{plan:?}: {:?}", sim.calls);
                 assert!(!sim.m.busy(), "{plan:?}: {:?}", sim.m.page);
                 scenarios += 1;
@@ -1448,9 +1460,373 @@ fn busy_by_page() {
     assert!(m.busy());
     m.page = Page::Fingers;
     assert!(!m.busy());
-    m.page = Page::Choose;
+    m.page = Page::Add;
     assert!(!m.busy());
     m.page = Page::Problem(Failure::service(&err(ErrorKind::Failed)));
     assert!(!m.busy());
     assert!(m.is_enrolled(Finger::LeftThumb) == m.fingers.contains(&Finger::LeftThumb));
+}
+
+// ------------------------------------------------------------ names
+
+fn labels(pairs: &[(Finger, &str)]) -> Labels {
+    pairs.iter().map(|(f, l)| (*f, l.to_string())).collect()
+}
+
+fn ready_named(fingers: &[Finger], names: &[(Finger, &str)]) -> Model {
+    let mut m = Model::with_labels(labels(names));
+    m.update(Input::Start);
+    m.update(Input::Connected(Ok(press())));
+    m.update(Input::Listed(Ok(fingers.to_vec())));
+    assert_eq!(m.page, Page::Fingers);
+    m
+}
+
+fn named(label: &str) -> Input {
+    Input::StartEnroll {
+        finger: None,
+        label: Some(label.into()),
+    }
+}
+
+/// Runs an enrolment that starts on the add page to completion.
+fn complete(m: &mut Model) {
+    let slot = enroll(m).slot;
+    assert_eq!(
+        m.update(Input::Claimed(Ok(Some(2)))),
+        [Command::EnrollStart(slot)]
+    );
+    m.update(Input::EnrollStarted(Ok(())));
+    m.update(status("enroll-stage-passed", false));
+    m.update(status("enroll-completed", true));
+    m.update(Input::EnrollStopped(Ok(())));
+    assert_eq!(m.update(Input::Released(Ok(()))), [Command::List]);
+    assert_eq!(enroll(m).outcome, Some(EnrollOutcome::Completed));
+}
+
+#[test]
+fn display_names_and_the_default_choice() {
+    let m = ready_named(
+        &[Finger::RightIndex, Finger::LeftThumb],
+        &[(Finger::LeftThumb, "Au lit")],
+    );
+    assert_eq!(
+        m.display_name(Finger::LeftThumb),
+        Arg::Text("Au lit".into())
+    );
+    assert_eq!(
+        m.display_name(Finger::RightIndex),
+        Arg::Finger(Finger::RightIndex)
+    );
+    assert_eq!(
+        name_of(&m.labels, Finger::LeftThumb),
+        Arg::Text("Au lit".into())
+    );
+    // Loading names is not a change to save.
+    let mut m2 = m.clone();
+    assert_eq!(m2.take_labels_to_save(), None);
+    // The add page starts on the first free finger, indexes then thumbs.
+    assert_eq!(m.default_choice(), Some(Finger::LeftIndex));
+    assert_eq!(ready(&[]).default_choice(), Some(Finger::RightIndex));
+    assert_eq!(
+        ready(&crate::fingers::COMMON).default_choice(),
+        Some(Finger::RightMiddle)
+    );
+    assert_eq!(ready(&Finger::ALL).default_choice(), None);
+}
+
+#[test]
+fn start_enroll_validates_the_choice() {
+    let mut m = ready(&[Finger::RightIndex]);
+    m.update(Input::AddFinger);
+    assert_eq!(m.page, Page::Add);
+    // An enrolled finger, or no finger and no name: nothing happens.
+    assert_eq!(m.update(pick(Finger::RightIndex)), []);
+    for label in [None, Some(String::new()), Some("   ".to_string())] {
+        assert_eq!(
+            m.update(Input::StartEnroll {
+                finger: None,
+                label
+            }),
+            []
+        );
+        assert_eq!(m.page, Page::Add);
+    }
+    // Stray inputs on the add page.
+    for i in [
+        Input::TestFinger,
+        Input::Claimed(Ok(None)),
+        Input::TryAgain,
+        Input::RenameFinger(Finger::RightIndex),
+        Input::SetLabel(Finger::RightIndex, Some("x".into())),
+    ] {
+        assert_eq!(m.update(i), []);
+        assert_eq!(m.page, Page::Add);
+    }
+    // A name alone: the first free slot (the left index), no finger to name.
+    assert_eq!(m.update(named("  Au lit  ")), [Command::Claim]);
+    let e = enroll(&m);
+    assert_eq!((e.slot, e.finger), (Finger::LeftIndex, None));
+    assert_eq!(e.label.as_deref(), Some("Au lit"));
+    assert_eq!(en(&e.title()), "Adding \u{201c}Au lit\u{201d}");
+    m.update(Input::Claimed(Ok(Some(3))));
+    m.update(Input::EnrollStarted(Ok(())));
+    assert_eq!(
+        en(&enroll(&m).instruction),
+        "Place your finger flat on the reader."
+    );
+
+    // A finger and a name of its own.
+    let mut m = ready(&[]);
+    m.update(Input::AddFinger);
+    m.update(Input::StartEnroll {
+        finger: Some(Finger::LeftThumb),
+        label: Some("Pouce, quand je suis au lit".into()),
+    });
+    let e = enroll(&m);
+    assert_eq!(
+        (e.slot, e.finger),
+        (Finger::LeftThumb, Some(Finger::LeftThumb))
+    );
+    m.update(Input::Claimed(Ok(Some(3))));
+    m.update(Input::EnrollStarted(Ok(())));
+    // The finger is named in the instruction; the title uses the name.
+    assert_eq!(
+        en(&enroll(&m).instruction),
+        "Place your left thumb flat on the reader."
+    );
+    assert_eq!(
+        en(&enroll(&m).title()),
+        "Adding \u{201c}Pouce, quand je suis au lit\u{201d}"
+    );
+    // A finger with a blank name: the standard name.
+    let mut m = ready(&[]);
+    m.update(Input::AddFinger);
+    m.update(Input::StartEnroll {
+        finger: Some(Finger::LeftThumb),
+        label: Some(" ".into()),
+    });
+    assert_eq!(enroll(&m).label, None);
+    assert_eq!(en(&enroll(&m).title()), "Adding \u{201c}Left thumb\u{201d}");
+}
+
+#[test]
+fn nameless_slots_follow_the_preferred_order() {
+    let mut m = ready(&[]);
+    let mut slots = Vec::new();
+    for i in 0..10 {
+        m.update(Input::AddFinger);
+        assert_eq!(m.update(named(&format!("n{i}"))), [Command::Claim]);
+        slots.push(enroll(&m).slot);
+        complete(&mut m);
+        m.update(Input::Cancel);
+    }
+    assert_eq!(slots, crate::fingers::PREFERRED);
+    assert_eq!(m.fingers.len(), 10);
+    assert_eq!(m.labels.len(), 10);
+    // Full: nothing more to add.
+    assert_eq!(m.update(Input::AddFinger), []);
+    assert_eq!(m.page, Page::Fingers);
+}
+
+#[test]
+fn the_name_is_kept_only_for_a_completed_enrolment() {
+    let mut m = ready(&[]);
+    m.update(Input::AddFinger);
+    m.update(named("Au lit"));
+    complete(&mut m);
+    assert_eq!(m.labels, labels(&[(Finger::RightIndex, "Au lit")]));
+    assert_eq!(
+        m.take_labels_to_save(),
+        Some(labels(&[(Finger::RightIndex, "Au lit")]))
+    );
+    assert_eq!(m.take_labels_to_save(), None, "once");
+    // The list refresh confirms it: nothing to save.
+    m.update(Input::Listed(Ok(vec![Finger::RightIndex])));
+    assert_eq!(m.take_labels_to_save(), None);
+
+    // Failed or cancelled: no name, nothing to save.
+    for end in ["fail", "cancel"] {
+        let mut m = ready(&[]);
+        m.update(Input::AddFinger);
+        m.update(named("Perdu"));
+        m.update(Input::Claimed(Ok(Some(3))));
+        m.update(Input::EnrollStarted(Ok(())));
+        if end == "fail" {
+            m.update(status("enroll-failed", true));
+        } else {
+            m.update(Input::Cancel);
+        }
+        m.update(Input::EnrollStopped(Ok(())));
+        m.update(Input::Released(Ok(())));
+        assert!(m.labels.is_empty(), "{end}");
+        assert_eq!(m.take_labels_to_save(), None, "{end}");
+        if end == "fail" {
+            // "Try again" keeps the slot, the finger choice and the name.
+            assert_eq!(m.update(Input::TryAgain), [Command::Claim]);
+            let e = enroll(&m);
+            assert_eq!(
+                (e.slot, e.finger, e.label.as_deref()),
+                (Finger::RightIndex, None, Some("Perdu"))
+            );
+        }
+    }
+}
+
+#[test]
+fn rename() {
+    let mut m = ready_named(&[Finger::LeftThumb], &[(Finger::LeftThumb, "Au lit")]);
+    // Not enrolled: nothing.
+    assert_eq!(m.update(Input::RenameFinger(Finger::RightIndex)), []);
+    assert!(m.dialog.is_none());
+    // Without the dialog, a name is not taken.
+    m.update(Input::SetLabel(Finger::LeftThumb, Some("x".into())));
+    assert_eq!(m.labels[&Finger::LeftThumb], "Au lit");
+    assert_eq!(m.update(Input::RenameFinger(Finger::LeftThumb)), []);
+    assert_eq!(m.dialog, Some(Dialog::Rename(Finger::LeftThumb)));
+    let (title, body, ok, cancel) = m.dialog.as_ref().unwrap().texts(&m.labels);
+    assert_eq!(en(&title), "Rename this fingerprint");
+    assert!(en(&body).starts_with("Choose a name you will recognise."));
+    assert_eq!(en(&ok), "Rename");
+    assert_eq!(en(&cancel.unwrap()), "Cancel");
+    // "OK" without the text, another finger's name, other inputs: nothing.
+    assert_eq!(m.update(Input::Confirm), []);
+    assert_eq!(m.dialog, Some(Dialog::Rename(Finger::LeftThumb)));
+    m.update(Input::SetLabel(Finger::RightIndex, Some("x".into())));
+    m.update(Input::TestFinger);
+    m.update(Input::AddFinger);
+    assert_eq!(m.dialog, Some(Dialog::Rename(Finger::LeftThumb)));
+    assert_eq!(m.page, Page::Fingers);
+    // The new name, cleaned.
+    assert_eq!(
+        m.update(Input::SetLabel(Finger::LeftThumb, Some(" Le soir ".into()))),
+        []
+    );
+    assert!(m.dialog.is_none());
+    assert_eq!(m.labels[&Finger::LeftThumb], "Le soir");
+    assert_eq!(
+        en(&m.take_notice().unwrap()),
+        "Fingerprint renamed: Le soir"
+    );
+    assert_eq!(
+        m.take_labels_to_save(),
+        Some(labels(&[(Finger::LeftThumb, "Le soir")]))
+    );
+    // The same name again: nothing to save.
+    m.update(Input::RenameFinger(Finger::LeftThumb));
+    m.update(Input::SetLabel(Finger::LeftThumb, Some("Le soir".into())));
+    assert_eq!(m.take_labels_to_save(), None);
+    // No name: back to the standard name.
+    m.update(Input::RenameFinger(Finger::LeftThumb));
+    m.update(Input::SetLabel(Finger::LeftThumb, None));
+    assert!(m.labels.is_empty());
+    assert_eq!(
+        en(&m.take_notice().unwrap()),
+        "Fingerprint renamed: Left thumb"
+    );
+    assert_eq!(m.take_labels_to_save(), Some(Labels::new()));
+    // Cancel: unchanged.
+    m.update(Input::RenameFinger(Finger::LeftThumb));
+    m.update(Input::Dismiss);
+    assert!(m.dialog.is_none());
+    assert_eq!(m.take_labels_to_save(), None);
+    assert!(m.notice.is_none());
+}
+
+#[test]
+fn names_of_fingerprints_gone_are_cleaned_up() {
+    let mut m = Model::with_labels(labels(&[
+        (Finger::LeftThumb, "a"),
+        (Finger::RightIndex, "b"),
+        (Finger::LeftRing, "c"),
+    ]));
+    m.update(Input::Start);
+    m.update(Input::Connected(Ok(press())));
+    // A failed list cleans nothing.
+    let mut failed = m.clone();
+    failed.update(Input::Listed(Err(err(ErrorKind::Busy))));
+    assert_eq!(failed.labels.len(), 3);
+    assert_eq!(failed.take_labels_to_save(), None);
+    m.update(Input::Listed(Ok(vec![
+        Finger::LeftThumb,
+        Finger::RightThumb,
+    ])));
+    assert_eq!(m.labels, labels(&[(Finger::LeftThumb, "a")]));
+    assert_eq!(
+        m.take_labels_to_save(),
+        Some(labels(&[(Finger::LeftThumb, "a")]))
+    );
+    // No enrolled prints at all: every name goes.
+    m.update(Input::Listed(Err(err(ErrorKind::NoPrints))));
+    assert!(m.labels.is_empty());
+    assert_eq!(m.take_labels_to_save(), Some(Labels::new()));
+}
+
+#[test]
+fn removing_a_fingerprint_removes_its_name() {
+    let mut m = ready_named(
+        &[Finger::LeftThumb, Finger::RightIndex],
+        &[
+            (Finger::LeftThumb, "Au lit"),
+            (Finger::RightIndex, "Bureau"),
+        ],
+    );
+    m.update(Input::RemoveFinger(Finger::LeftThumb));
+    let (_, body, _, _) = m.dialog.as_ref().unwrap().texts(&m.labels);
+    assert_eq!(
+        en(&body),
+        "\u{201c}Au lit\u{201d} will no longer unlock this computer. You can add it again later."
+    );
+    m.update(Input::Confirm);
+    m.update(Input::Claimed(Ok(None)));
+    m.update(Input::Deleted(Ok(())));
+    m.update(Input::Released(Ok(())));
+    assert_eq!(en(&m.take_notice().unwrap()), "Fingerprint removed: Au lit");
+    assert_eq!(m.labels, labels(&[(Finger::RightIndex, "Bureau")]));
+    assert_eq!(
+        m.take_labels_to_save(),
+        Some(labels(&[(Finger::RightIndex, "Bureau")]))
+    );
+    // A failed removal keeps the name.
+    m.update(Input::RemoveFinger(Finger::RightIndex));
+    m.update(Input::Confirm);
+    m.update(Input::Claimed(Ok(None)));
+    m.update(Input::Deleted(Err(err(ErrorKind::NotDeleted))));
+    m.update(Input::Released(Ok(())));
+    assert_eq!(m.labels.len(), 1);
+    assert_eq!(m.take_labels_to_save(), None);
+    assert!(matches!(m.dialog, Some(Dialog::Error(_))));
+    m.update(Input::Confirm);
+    // "Remove all" removes every name.
+    m.update(Input::RemoveFinger(Finger::RightIndex));
+    m.update(Input::Confirm);
+    m.update(Input::Claimed(Ok(None)));
+    m.update(Input::Deleted(Err(err(ErrorKind::Unsupported))));
+    m.update(Input::Released(Ok(())));
+    m.update(Input::Confirm);
+    m.update(Input::Claimed(Ok(None)));
+    m.update(Input::Deleted(Ok(())));
+    m.update(Input::Released(Ok(())));
+    assert!(m.labels.is_empty());
+    assert_eq!(m.take_labels_to_save(), Some(Labels::new()));
+}
+
+#[test]
+fn the_test_uses_the_name() {
+    let mut m = ready_named(&[Finger::LeftThumb], &[(Finger::LeftThumb, "Au lit")]);
+    m.update(Input::TestFinger);
+    m.update(Input::Claimed(Ok(None)));
+    m.update(Input::VerifyStarted(Ok(())));
+    m.update(Input::VerifyFingerSelected("left-thumb".into()));
+    assert_eq!(
+        en(&test(&m).instruction),
+        "Place the finger \u{201c}Au lit\u{201d} on the reader."
+    );
+    m.update(vstatus("verify-match", true));
+    m.update(Input::VerifyStopped(Ok(())));
+    m.update(Input::Released(Ok(())));
+    let (title, _) = test(&m).outcome.as_ref().unwrap().texts(&m.labels).unwrap();
+    assert_eq!(en(&title), "Recognised: Au lit");
+    let fr = Catalogue::builtin("fr").unwrap();
+    assert_eq!(title.render(&fr), "Reconnu\u{a0}: Au lit");
 }
