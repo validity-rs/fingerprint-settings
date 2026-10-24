@@ -150,11 +150,21 @@ to the cargo command (then without `--locked`, and do not commit the
 
 ### CI
 
-`ci/run.sh` is the whole CI, runnable locally: `noai zizmor gitleaks fmt
-clippy doc test packaging e2e`. The Rust jobs run in the pinned Debian 13
-image (`docker/Dockerfile.debian`) when docker is available, or on the host
-with `CI_HOST=1`. GitHub Actions (`.github/workflows/ci.yml`) calls the same
-jobs.
+`ci/run.sh` is the whole CI, runnable locally (`ci/run.sh` for the quick
+set, `ci/run.sh all` for everything, or named jobs; the script's header lists
+them):
+
+- `noai zizmor gitleaks` on the host;
+- `fmt clippy doc test packaging e2e` in the pinned Debian 13 image
+  (`docker/Dockerfile.debian`) when docker is available, or on the host with
+  `CI_HOST=1`;
+- `distro:<distro>`: `cargo test` on Debian 13, Fedora, Arch Linux and
+  Alpine 3.24, each with its own GTK 4 and libadwaita
+  (`docker/Dockerfile.<distro>`).
+
+Every image is pinned by digest, every action by commit, every downloaded
+tool by version and SHA-256. GitHub Actions (`.github/workflows/ci.yml`)
+calls the same jobs.
 
 ## Architecture
 

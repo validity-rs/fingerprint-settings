@@ -62,14 +62,15 @@ jobs:
         env:
           CI_TOOLS: ${{ runner.temp }}
 
-  # The Rust jobs run in the Debian 13 image (docker/Dockerfile.debian).
+  # fmt, clippy, doc and the desktop entry and metainfo, in the Debian 13
+  # image (docker/Dockerfile.debian).
   rust:
     name: ${{ matrix.job }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        job: [fmt, clippy, doc, test, packaging]
+        job: [fmt, clippy, doc, packaging]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,6 +79,22 @@ jobs:
       - run: ci/run.sh "$JOB"
         env:
           JOB: ${{ matrix.job }}
+
+  # cargo test in each distro's image, with its own GTK 4 and libadwaita.
+  distro:
+    name: Test (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, fedora, archlinux, alpine]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh "distro:$DISTRO"
+        env:
+          DISTRO: ${{ matrix.distro }}
 
   # The application's core against validity-rs's daemon with its emulated
   # sensor (e2e/), validity-rs fetched by cargo at the pinned commit.

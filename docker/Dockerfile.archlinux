@@ -1,0 +1,24 @@
+# Arch Linux with Arch's own Rust, GTK 4 and libadwaita.
+# The `ci` stage (docker build --target ci) runs the tests
+# (ci/run.sh distro:archlinux).
+#
+# Arch is rolling and does not support partial upgrades, so the stage
+# upgrades the whole system: the digest (the same as validity-rs's) pins the
+# starting point, the packages are whatever Arch ships on the day the image
+# is built.
+FROM archlinux:base@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0 AS ci
+
+ENV CARGO_HOME=/usr/local/cargo
+RUN pacman -Syu --noconfirm --needed \
+        base-devel \
+        dbus \
+        gtk4 \
+        libadwaita \
+        rust \
+    && pacman -Scc --noconfirm \
+    && rustc --version \
+    && dbus-daemon --version | head -1 \
+    && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/bash"]

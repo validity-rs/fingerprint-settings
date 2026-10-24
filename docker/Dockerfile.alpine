@@ -1,0 +1,25 @@
+# Alpine 3.24 (musl libc) with GTK 4 and libadwaita from Alpine.
+# The `ci` stage (docker build --target ci) runs the tests
+# (ci/run.sh distro:alpine).
+#
+# Rust comes from the official image, not from Alpine: Alpine 3.24's rust is
+# 1.96, older than the crate's rust-version (1.99). The official image's
+# toolchain links statically by default on musl; GTK is only available as
+# shared libraries, so ci/run.sh builds with
+# `-C target-feature=-crt-static`, as Alpine's own rust does by default.
+#
+# The base image is pinned by version and digest (the same as
+# validity-rs's).
+FROM rust:1.99.1-alpine3.24@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87 AS ci
+
+RUN apk add --no-cache \
+        dbus \
+        gtk4.0-dev \
+        libadwaita-dev \
+        musl-dev \
+    && rustc --version \
+    && dbus-daemon --version | head -1 \
+    && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/sh"]
