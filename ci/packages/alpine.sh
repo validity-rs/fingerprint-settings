@@ -55,7 +55,11 @@ echo "apkbuild-lint: clean"
 cp "$work"/packages/ci/x86_64/fingerprint-settings-*.apk "$build/APKBUILD" "$out/"
 cp /home/builder/.abuild/*.rsa.pub "$out/"
 
-src=$build/src/$name
+# abuild removes its source directory once done: the stub is built from a
+# tree of its own.
+mkdir "$work/stub"
+tar -xzf "$tarball" -C "$work/stub"
+src=$work/stub/$name
 (cd "$src" && RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --locked --offline --example stub_service)
 install -m755 "$src/target/release/examples/stub_service" "$out/stub_service"
 
