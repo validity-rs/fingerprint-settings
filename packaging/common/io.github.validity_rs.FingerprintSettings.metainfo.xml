@@ -26,13 +26,13 @@
       dont vous ne vous servez plus. Votre mot de passe fonctionne toujours.
     </p>
     <p>
-      Made for desktops without fingerprint settings of their own, such as XFCE, MATE
+      Made for desktops without fingerprint settings of their own, such as Xfce, MATE
       and LXQt. It works with any fingerprint service that speaks the fprintd D-Bus
       interface, fprintd itself included.
     </p>
     <p xml:lang="fr">
       Conçu pour les bureaux qui n'ont pas leurs propres réglages d'empreintes, comme
-      XFCE, MATE et LXQt. Fonctionne avec tout service d'empreintes qui parle
+      Xfce, MATE et LXQt. Fonctionne avec tout service d'empreintes qui parle
       l'interface D-Bus de fprintd, fprintd lui-même compris.
     </p>
     <ul>

@@ -1,0 +1,45 @@
+.TH FINGERPRINT-SETTINGS 1 "2026-10-23" "fingerprint-settings 0.1.0" "User Commands"
+.SH NAME
+fingerprint-settings \- add, name, test and remove your own fingerprints
+.SH SYNOPSIS
+.B fingerprint-settings
+.RB [ \-\-help ]
+.SH DESCRIPTION
+.B fingerprint-settings
+(\(lqFingerprints\(rq in the menus) is a desktop application to manage the
+fingerprints of the user who runs it: register a finger, give it a name, check
+that it is recognised, rename it, and remove it.
+.PP
+It talks to any fingerprint service that speaks the fprintd D\-Bus interface
+(\fBnet.reactivated.Fprint\fR on the system bus): \fBfprintd\fR(1) itself, or
+a compatible service such as validity\-rs's daemon. Whether the user may add
+or remove fingerprints is decided by the service's polkit policy; fprintd's
+asks for the user's own password, so a polkit authentication agent must be
+running in the session.
+.PP
+The password always keeps working: the application never changes how the user
+logs in.
+.SH OPTIONS
+The application has no options of its own; it is used through its window.
+.TP
+.BR \-h ", " \-\-help
+Show the standard GTK application options.
+.SH ENVIRONMENT
+.TP
+.B LANGUAGE\fR, \fBLC_ALL\fR, \fBLC_MESSAGES\fR, \fBLANG
+The language of the window, as with gettext (English and French).
+.TP
+.B XDG_CONFIG_HOME
+Where the names are kept (default \fI~/.config\fR).
+.TP
+.B DBUS_SYSTEM_BUS_ADDRESS
+The bus the fingerprint service is on (default: the system bus).
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/fingerprint-settings/names.toml
+The names given to the fingerprints, keyed by fprintd's finger names. The
+fingerprints themselves are kept by the fingerprint service, not here.
+.SH SEE ALSO
+.BR fprintd (1)
+.PP
+https://github.com/validity\-rs/fingerprint\-settings

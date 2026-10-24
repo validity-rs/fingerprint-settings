@@ -1,0 +1,54 @@
+# The APKBUILD of Fingerprints (fingerprint-settings), as a template:
+# ci/packages/alpine.sh writes the APKBUILD from it, with the version from
+# Cargo.toml and the checksum of the vendored source tarball
+# (ci/packages/tarball.sh), and leaves it in dist/alpine/: that is what goes
+# to aports.
+#
+# Built with the Rust of the official rust:*-alpine3.24 image, not Alpine's
+# cargo: Alpine 3.24's Rust (1.96) is older than the crate's rust-version
+# (1.99), so cargo is not in makedepends. Once Alpine's Rust is new enough,
+# add "cargo" to makedepends and drop the crt-static flag below.
+#
+# Maintainer: pierre-warnier <409744+pierre-warnier@users.noreply.github.com>
+pkgname=fingerprint-settings
+pkgver=@VERSION@
+pkgrel=0
+pkgdesc="Manage your own fingerprints with any fprintd-compatible service"
+url="https://github.com/validity-rs/fingerprint-settings"
+arch="x86_64"
+license="MIT"
+# fprintd: any service that speaks fprintd's D-Bus API will do; another one
+# (validity-rs's daemon) provides fprintd.
+depends="fprintd hicolor-icon-theme"
+makedepends="gtk4.0-dev libadwaita-dev"
+subpackages="$pkgname-doc"
+# The vendored tarball: every crate is in it, the build is offline.
+source="$pkgname-$pkgver.tar.gz::https://github.com/validity-rs/fingerprint-settings/releases/download/v$pkgver/fingerprint-settings-$pkgver.tar.gz"
+
+# The official image's Rust links statically on musl by default; GTK is only
+# available as shared libraries (Alpine's own Rust links dynamically).
+_rustflags="-C target-feature=-crt-static"
+
+build() {
+	RUSTFLAGS="$_rustflags" cargo build --frozen --release
+}
+
+check() {
+	RUSTFLAGS="$_rustflags" cargo test --frozen --release
+}
+
+package() {
+	local appid=io.github.validity_rs.FingerprintSettings
+	install -Dm755 target/release/$pkgname "$pkgdir"/usr/bin/$pkgname
+	install -Dm644 packaging/common/$appid.desktop "$pkgdir"/usr/share/applications/$appid.desktop
+	install -Dm644 packaging/common/$appid.metainfo.xml "$pkgdir"/usr/share/metainfo/$appid.metainfo.xml
+	install -Dm644 packaging/common/icons/hicolor/scalable/apps/$appid.svg \
+		"$pkgdir"/usr/share/icons/hicolor/scalable/apps/$appid.svg
+	install -Dm644 packaging/common/$pkgname.1 "$pkgdir"/usr/share/man/man1/$pkgname.1
+	install -Dm644 README.md "$pkgdir"/usr/share/doc/$pkgname/README.md
+	install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+sha512sums="
+@SHA512@  $pkgname-$pkgver.tar.gz
+"

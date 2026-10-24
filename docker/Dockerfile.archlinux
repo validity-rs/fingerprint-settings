@@ -1,8 +1,12 @@
-# Arch Linux with Arch's own Rust, GTK 4 and libadwaita.
-# The `ci` stage (docker build --target ci) runs the tests
-# (ci/run.sh distro:archlinux).
+# Arch Linux with Arch's own Rust, GTK 4 and libadwaita. Stages
+# (docker build --target <stage>):
 #
-# Arch is rolling and does not support partial upgrades, so the stage
+#   ci       the tests (ci/run.sh distro:archlinux)
+#   package  builds the package from the vendored tarball (makepkg, the
+#            PKGBUILD in packaging/archlinux/) and checks it (namcap)
+#   install  a fresh Arch, where the package is installed, launched and removed
+#
+# Arch is rolling and does not support partial upgrades, so each stage
 # upgrades the whole system: the digest (the same as validity-rs's) pins the
 # starting point, the packages are whatever Arch ships on the day the image
 # is built.
@@ -19,6 +23,30 @@ RUN pacman -Syu --noconfirm --needed \
     && rustc --version \
     && dbus-daemon --version | head -1 \
     && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/bash"]
+
+FROM ci AS package
+
+# makepkg refuses to run as root: it builds as "builder".
+RUN pacman -Syu --noconfirm --needed \
+        appstream \
+        desktop-file-utils \
+        namcap \
+    && pacman -Scc --noconfirm \
+    && useradd --create-home builder \
+    && makepkg --version | head -1 && command -v namcap
+
+FROM archlinux:base@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0 AS install
+
+RUN pacman -Syu --noconfirm --needed \
+        appstream \
+        dbus \
+        desktop-file-utils \
+        xorg-server-xvfb \
+        xorg-xwininfo \
+    && pacman -Scc --noconfirm
 
 WORKDIR /src
 CMD ["/bin/bash"]

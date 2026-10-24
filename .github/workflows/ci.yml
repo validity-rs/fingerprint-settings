@@ -106,3 +106,28 @@ jobs:
         with:
           persist-credentials: false
       - run: ci/run.sh e2e
+
+  # Each package's whole cycle: vendored tarball, package built and checked
+  # (lintian, rpmlint, namcap, apkbuild-lint), then installed, launched
+  # headless and removed in a fresh container of its distro.
+  package:
+    name: Package (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, fedora, archlinux, alpine]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh "package:$DISTRO"
+        env:
+          DISTRO: ${{ matrix.distro }}
+      # The packages of this commit, to try them by hand (not a release).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.distro }}
+          path: dist/${{ matrix.distro }}/
+          if-no-files-found: error
+          retention-days: 14

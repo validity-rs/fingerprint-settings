@@ -1,6 +1,10 @@
 # Fedora (latest stable release: 44 when pinned) with Fedora's own Rust,
-# GTK 4 and libadwaita. The `ci` stage (docker build --target ci) runs the
-# tests (ci/run.sh distro:fedora).
+# GTK 4 and libadwaita. Stages (docker build --target <stage>):
+#
+#   ci       the tests (ci/run.sh distro:fedora)
+#   package  builds the .rpm from the vendored tarball (rpmbuild, the spec in
+#            packaging/fedora/) and checks it (rpmlint)
+#   install  a fresh Fedora, where the .rpm is installed, launched and removed
 #
 # Fedora ships current Rust releases as updates to its stable release, so the
 # distro toolchain is tested here rather than a rustup one. `latest` names
@@ -20,6 +24,31 @@ RUN dnf install -y \
     && rustc --version \
     && dbus-daemon --version | head -1 \
     && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/bash"]
+
+FROM ci AS package
+
+# cargo-rpm-macros: Fedora's Rust macros (%cargo_prep, %cargo_build...).
+RUN dnf install -y \
+        appstream \
+        cargo-rpm-macros \
+        desktop-file-utils \
+        rpm-build \
+        rpmlint \
+    && dnf clean all \
+    && rpmbuild --version && rpmlint --version
+
+FROM fedora:latest@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80 AS install
+
+RUN dnf install -y \
+        appstream \
+        dbus-daemon \
+        desktop-file-utils \
+        xorg-x11-server-Xvfb \
+        xwininfo \
+    && dnf clean all
 
 WORKDIR /src
 CMD ["/bin/bash"]

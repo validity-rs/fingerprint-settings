@@ -2,7 +2,7 @@
 
 A small desktop application to manage **your own fingerprints**: add one,
 name it, test it, remove it. It is meant for desktops that have no
-fingerprint settings of their own, such as **XFCE, MATE and LXQt**, and for
+fingerprint settings of their own, such as **Xfce, MATE and LXQt**, and for
 people who want something plain and readable.
 
 - **Add a fingerprint**: four big buttons for the fingers people use (right
@@ -44,7 +44,7 @@ App id: `io.github.validity_rs.FingerprintSettings`. License: MIT.
 Whether you may change your fingerprints is decided by the service's polkit
 policy (`net.reactivated.fprint.device.enroll`). fprintd's default asks for
 **your own password** before adding or removing a fingerprint, so a polkit
-authentication agent must be running in the session (XFCE: `xfce-polkit` or
+authentication agent must be running in the session (Xfce: `xfce-polkit` or
 `policykit-1-gnome`; MATE: `mate-polkit`; LXQt: `lxqt-policykit`). Without
 one, the application says you are not allowed. A call that may show this
 prompt is given ten minutes; any other call one minute, after which the
@@ -82,7 +82,51 @@ cargo build --release
 ./target/release/fingerprint-settings
 ```
 
-To install for all users:
+### Packages
+
+Each package is built from the vendored source tarball (below) in a pinned
+container of its distro, checked with the distro's own tool, then installed,
+launched headless and removed in a fresh container (`ci/run.sh
+package:<distro>`; the files land in `dist/<distro>/`):
+
+| Distro | Recipe | Built with | Checked with | Depends on a service |
+|---|---|---|---|---|
+| Debian 13 | `[package.metadata.deb]` in `Cargo.toml`, `packaging/debian/` | cargo-deb 3.8.0 | lintian (errors, warnings and info fail; the two overrides are explained in `packaging/debian/lintian-overrides`) | `fprintd \| validity-daemon` |
+| Fedora 44 | `packaging/fedora/fingerprint-settings.spec` | rpmbuild, Fedora's Rust macros | rpmlint `--strict` | `(fprintd or validity-daemon)` |
+| Arch Linux | `packaging/archlinux/PKGBUILD.in` | makepkg | namcap (only the findings listed, with their reasons, in `packaging/archlinux/namcap-expected`) | `fprintd` (another service provides it) |
+| Alpine 3.24 | `packaging/alpine/APKBUILD.in` | abuild | apkbuild-lint | `fprintd` (likewise) |
+
+Every package ships the binary, the desktop entry, the AppStream metainfo,
+the icon (hicolor), the manual page, the README and the license. The
+translations are compiled into the binary, so there are no `.mo` files. In
+every distro, `desktop-file-validate` and `appstreamcli validate` check the
+installed desktop entry and metainfo, and the package manager's own check
+(`dpkg --verify`, `rpm -V`, `pacman -Qkk`, `apk audit`) checks the installed
+files.
+
+The headless launch (`ci/packages/smoke.sh`) runs, inside the container, a
+private bus, a stub fingerprint service (`examples/stub_service.rs`: one
+reader, one enrolled finger) and Xvfb, starts the installed
+`/usr/bin/fingerprint-settings`, and passes once the application has asked
+the service for its fingerprints, its "Fingerprints" window is mapped, and it
+is still running with no panic or critical message in its log.
+
+Notes:
+
+- The PKGBUILD and the APKBUILD are templates: the build writes the version
+  from `Cargo.toml` and the tarball's checksum into them (makepkg and abuild
+  then check the tarball against it), and leaves the written ones in
+  `dist/<distro>/`, for the AUR and for aports.
+- Alpine 3.24's Rust (1.96) is older than the crate's `rust-version`
+  (1.99): the Alpine package is built with the official `rust:1.99.1-alpine3.24`
+  image's toolchain, and links dynamically (`-C target-feature=-crt-static`)
+  like Alpine's own Rust. The `.apk` files CI builds are signed with a key
+  made for each build.
+- The `.deb` is ready for an APT repository (`Section`, `Priority`,
+  `md5sums`, a Debian changelog, versioned shared-library dependencies); the
+  repository itself is shared with validity-rs.
+
+To install from source instead, for all users:
 
 ```bash
 sudo install -Dm755 target/release/fingerprint-settings /usr/local/bin/fingerprint-settings
@@ -92,9 +136,10 @@ sudo install -Dm644 packaging/common/io.github.validity_rs.FingerprintSettings.m
     /usr/local/share/metainfo/io.github.validity_rs.FingerprintSettings.metainfo.xml
 sudo install -Dm644 packaging/common/icons/hicolor/scalable/apps/io.github.validity_rs.FingerprintSettings.svg \
     /usr/local/share/icons/hicolor/scalable/apps/io.github.validity_rs.FingerprintSettings.svg
+sudo install -Dm644 packaging/common/fingerprint-settings.1 /usr/local/share/man/man1/fingerprint-settings.1
 ```
 
-The desktop entry puts "Fingerprints" in the Settings menu and, on XFCE, in
+The desktop entry puts "Fingerprints" in the Settings menu and, on Xfce, in
 the Settings Manager under Hardware.
 
 ### Trying it without a reader
@@ -130,6 +175,8 @@ cargo test --manifest-path e2e/Cargo.toml    # the end-to-end test
 - `tests/translations.rs`: every user-visible string has a French
   translation, the catalogue has nothing stale, placeholders and French
   typography are right; the desktop entry and metainfo are translated.
+- `tests/packaging.rs`: the version in `Cargo.toml` is the one of the
+  metainfo's latest release, the Debian changelog and the Fedora spec.
 - `e2e/tests/end_to_end.rs`: the same core and D-Bus driver as the window,
   against validity-rs's daemon with its emulated sensor on a private
   `dbus-daemon`: enrol, list, test, remove, duplicates, cancels, a busy
@@ -159,12 +206,16 @@ them):
   (`docker/Dockerfile.debian`) when docker is available, or on the host with
   `CI_HOST=1`;
 - `distro:<distro>`: `cargo test` on Debian 13, Fedora, Arch Linux and
-  Alpine 3.24, each with its own GTK 4 and libadwaita
-  (`docker/Dockerfile.<distro>`).
+  Alpine 3.24, each with its own GTK 4 and libadwaita;
+- `package:<distro>`: the full package cycle above (`REPRODUCE=1` builds
+  each package twice and fails if the two differ);
+- `tarball`: the vendored source tarball alone.
 
-Every image is pinned by digest, every action by commit, every downloaded
-tool by version and SHA-256. GitHub Actions (`.github/workflows/ci.yml`)
-calls the same jobs.
+Every image is pinned by digest (`docker/Dockerfile.<distro>`, one per
+distro, with `ci`, `package` and `install` stages), every action by commit,
+every downloaded tool by version and SHA-256. GitHub Actions
+(`.github/workflows/ci.yml`) calls the same jobs; it also keeps each
+commit's packages as artifacts for two weeks.
 
 ## Architecture
 

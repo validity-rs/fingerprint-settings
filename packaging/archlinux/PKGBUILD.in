@@ -1,0 +1,56 @@
+# The PKGBUILD of Fingerprints (fingerprint-settings), as a template:
+# ci/packages/archlinux.sh writes the PKGBUILD from it, with the version from
+# Cargo.toml and the checksum of the vendored source tarball
+# (ci/packages/tarball.sh), and leaves it in dist/archlinux/ with its
+# .SRCINFO: those two are what goes to the AUR.
+#
+# Maintainer: pierre-warnier <409744+pierre-warnier@users.noreply.github.com>
+
+pkgname=fingerprint-settings
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Manage your own fingerprints with any fprintd-compatible service"
+arch=('x86_64')
+url="https://github.com/validity-rs/fingerprint-settings"
+license=('MIT')
+# fprintd: any service that speaks fprintd's D-Bus API will do; another one
+# (validity-rs's daemon) provides fprintd.
+depends=(
+    'fprintd'
+    'glib2'
+    'glibc'
+    'gtk4'
+    'hicolor-icon-theme'
+    'libadwaita'
+    'libgcc'
+    'pango'
+)
+makedepends=('cargo')
+# The vendored tarball: every crate is in it, the build is offline.
+source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha256sums=('@SHA256@')
+
+build() {
+    cd "$pkgname-$pkgver"
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    export CARGO_TARGET_DIR=target
+    cargo test --frozen --release
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    local appid=io.github.validity_rs.FingerprintSettings
+    install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+    install -Dm644 "packaging/common/$appid.desktop" "$pkgdir/usr/share/applications/$appid.desktop"
+    install -Dm644 "packaging/common/$appid.metainfo.xml" "$pkgdir/usr/share/metainfo/$appid.metainfo.xml"
+    install -Dm644 "packaging/common/icons/hicolor/scalable/apps/$appid.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/$appid.svg"
+    install -Dm644 "packaging/common/$pkgname.1" "$pkgdir/usr/share/man/man1/$pkgname.1"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

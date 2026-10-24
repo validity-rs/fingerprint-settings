@@ -1,14 +1,19 @@
-# Alpine 3.24 (musl libc) with GTK 4 and libadwaita from Alpine.
-# The `ci` stage (docker build --target ci) runs the tests
-# (ci/run.sh distro:alpine).
+# Alpine 3.24 (musl libc) with GTK 4 and libadwaita from Alpine. Stages
+# (docker build --target <stage>):
+#
+#   ci       the tests (ci/run.sh distro:alpine)
+#   package  builds the .apk from the vendored tarball (abuild, the APKBUILD
+#            in packaging/alpine/) and checks it (apkbuild-lint)
+#   install  a fresh Alpine 3.24, where the .apk is installed, launched and
+#            removed
 #
 # Rust comes from the official image, not from Alpine: Alpine 3.24's rust is
 # 1.96, older than the crate's rust-version (1.99). The official image's
 # toolchain links statically by default on musl; GTK is only available as
-# shared libraries, so ci/run.sh builds with
+# shared libraries, so ci/run.sh and the APKBUILD build with
 # `-C target-feature=-crt-static`, as Alpine's own rust does by default.
 #
-# The base image is pinned by version and digest (the same as
+# Base images pinned by version and digest (the Rust one is the same as
 # validity-rs's).
 FROM rust:1.99.1-alpine3.24@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87 AS ci
 
@@ -20,6 +25,37 @@ RUN apk add --no-cache \
     && rustc --version \
     && dbus-daemon --version | head -1 \
     && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/sh"]
+
+FROM ci AS package
+
+# abuild builds as "builder" (a member of the abuild group), with a signing
+# key made for this image: CI's packages are signed with a throwaway key,
+# whose public half the install stage is given (see ci/packages/alpine.sh).
+# atools: apkbuild-lint. bash, coreutils, runuser: what the build script
+# (ci/packages/alpine.sh) uses, as in the other distros.
+RUN apk add --no-cache \
+        abuild \
+        appstream \
+        atools \
+        bash \
+        coreutils \
+        desktop-file-utils \
+        runuser \
+    && adduser -D builder \
+    && addgroup builder abuild \
+    && command -v abuild abuild-keygen apkbuild-lint
+
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS install
+
+RUN apk add --no-cache \
+        appstream \
+        dbus \
+        desktop-file-utils \
+        xvfb \
+        xwininfo
 
 WORKDIR /src
 CMD ["/bin/sh"]

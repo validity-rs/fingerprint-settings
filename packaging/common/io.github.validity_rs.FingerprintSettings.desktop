@@ -10,7 +10,7 @@ Exec=fingerprint-settings
 Icon=io.github.validity_rs.FingerprintSettings
 Terminal=false
 StartupNotify=true
-# X-XFCE-*: listed in the XFCE Settings Manager, under Hardware.
+# X-XFCE-*: listed in the Xfce Settings Manager, under Hardware.
 Categories=GTK;Settings;HardwareSettings;X-XFCE-SettingsDialog;X-XFCE-HardwareSettings;
 Keywords=fingerprint;finger;biometric;login;unlock;fprint;
 Keywords[fr]=empreinte;doigt;biométrie;connexion;déverrouiller;

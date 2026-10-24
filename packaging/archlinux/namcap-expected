@@ -1,0 +1,9 @@
+# namcap findings that are expected, each with its reason. ci/packages/archlinux.sh
+# fails on any finding not listed here, and on a listed one that is gone.
+#
+# The binary does use the dynamic loader: __tls_get_addr@GLIBC_2.3 (thread
+# locals); namcap's check misses it.
+fingerprint-settings W: Unused shared library '/usr/lib64/ld-linux-x86-64.so.2' by file ('usr/bin/fingerprint-settings')
+# fprintd is a service the application calls over D-Bus, not a library it
+# links: namcap cannot see the use.
+fingerprint-settings W: Dependency included, but may not be needed ('fprintd')

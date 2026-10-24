@@ -3,13 +3,15 @@
 # run means a green CI run.
 #
 #   ci/run.sh                    # quick: noai zizmor gitleaks fmt clippy doc test packaging e2e
-#   ci/run.sh all                # quick + every distro
+#   ci/run.sh all                # quick + every distro and every package
 #   ci/run.sh clippy test        # selected jobs
 #   ci/run.sh distro:fedora      # the tests on one distro (distro: all four)
+#   ci/run.sh package:alpine     # one package's full cycle (package: all four)
 #
 # Distros: debian (the reference, Debian 13), fedora, archlinux, alpine. Each
-# has one image, docker/Dockerfile.<distro>, whose `ci` stage builds and
-# tests.
+# has one image, docker/Dockerfile.<distro>, with three stages: `ci` (build
+# and test), `package` (build and check the package) and `install` (a fresh
+# system, where the package is installed, launched and removed).
 #
 # Jobs:
 #   noai zizmor gitleaks   on the host
@@ -19,6 +21,12 @@
 #   distro:<d>             cargo test in the distro's image
 #   e2e                    the end-to-end test (e2e/) against validity-rs's
 #                          daemon, in the Debian image (or on the host)
+#   tarball                the vendored source tarball, in dist/
+#   package:<d>            tarball, package, checks (lintian, rpmlint,
+#                          namcap, apkbuild-lint), then install, headless
+#                          launch and removal in a fresh container; in
+#                          dist/<d>/. REPRODUCE=1 builds the package twice
+#                          and fails if the two differ.
 #
 # The end-to-end test is a package of its own (e2e/), which depends on
 # validity-rs's daemon by git URL and commit (e2e/Cargo.toml): cargo fetches
@@ -97,11 +105,13 @@ image() {
     return 1
 }
 
-# docker run with this checkout at /src.
+# docker run with this checkout at /src. Files the container writes are given
+# back to the caller's user (HOST_UID, HOST_GID: the scripts chown dist/).
 drun() {
     docker run --rm "${RUN_ARGS[@]}" \
         -v "$PWD:/src" -w /src \
         -e CARGO_TERM_COLOR -e CARGO_NET_RETRY -e CARGO_BUILD_JOBS \
+        -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
         "$@"
 }
 
@@ -133,6 +143,10 @@ in_image() {
 }
 
 run() { if use_image; then in_image debian "$*"; else sh -c "$*"; fi; }
+
+# Gives files written as root in a container back to the caller.
+# shellcheck disable=SC2016 # expanded by the container's shell, on purpose
+give_back() { printf 'chown -R "$HOST_UID:$HOST_GID" %s' "$*"; }
 
 job_noai() { bash .github/scripts/no-ai-traces.sh HEAD; }
 job_zizmor() { "$(tool_zizmor)" --offline --persona=pedantic .github/workflows; }
@@ -174,8 +188,80 @@ job_e2e() {
     fi
 }
 
+# The vendored source tarball (ci/packages/tarball.sh), in dist/. With
+# REPRODUCE=1 it is built a second time and must be the same bytes.
+job_tarball() {
+    local img
+    img=$(image debian ci) || return 1
+    rm -f dist/fingerprint-settings-*.tar.gz
+    mkdir -p dist
+    drun -v fingerprint-settings-cargo-debian:/usr/local/cargo/registry "$img" \
+        sh -c "ci/packages/tarball.sh dist; rc=\$?; $(give_back dist); exit \$rc" || return 1
+    if [ -n "${REPRODUCE:-}" ]; then
+        drun -v fingerprint-settings-cargo-debian:/usr/local/cargo/registry "$img" \
+            sh -c "ci/packages/tarball.sh dist/again; rc=\$?; $(give_back dist); exit \$rc" || return 1
+        cmp dist/fingerprint-settings-*.tar.gz dist/again/fingerprint-settings-*.tar.gz || {
+            echo "NOT reproducible: the vendored tarball" >&2
+            return 1
+        }
+        echo "reproducible: $(basename dist/fingerprint-settings-*.tar.gz)"
+        rm -rf dist/again
+    fi
+}
+
+# package:<distro>: the tarball, then the package built and checked in the
+# package stage, then installed, launched and removed in the install stage.
+job_package() {
+    local d
+    job_tarball || return 1
+    for d in "${@:-${DISTROS[@]}}"; do
+        say "package $d"
+        package_one "$d" || return 1
+    done
+}
+
+package_one() {
+    local d=$1 build install tarball
+    tarball=$(ls dist/fingerprint-settings-*.tar.gz)
+    build=$(image "$d" package) || return 1
+    install=$(image "$d" install) || return 1
+    build_package "$build" "$d" "$tarball" "dist/$d" || return 1
+    if [ -n "${REPRODUCE:-}" ]; then
+        say "package $d: second build, compared with the first"
+        build_package "$build" "$d" "$tarball" "dist/$d.again" || return 1
+        reproducible "$d" || return 1
+    fi
+    say "package $d: install, launch, remove in a fresh $d"
+    drun "$install" ci/packages/install.sh "$d" "dist/$d"
+}
+
+build_package() {
+    local img=$1 d=$2 tarball=$3 out=$4
+    rm -rf "$out"
+    drun "$img" sh -c "ci/packages/$d.sh '$tarball' '$out'; rc=\$?; $(give_back dist); exit \$rc"
+}
+
+# The packages of two builds must be the same bytes. Alpine's .apk carries
+# its signature (made with a key generated for each image) and the build
+# time, so it is compared without its signature.
+reproducible() {
+    local d=$1 f g bad=0
+    for f in "dist/$d"/*; do
+        case $f in */stub_service | *.rsa.pub) continue ;; esac
+        g="dist/$d.again/$(basename "$f")"
+        if cmp -s "$f" "$g"; then
+            echo "reproducible: $(basename "$f")"
+        else
+            echo "NOT reproducible: $(basename "$f")" >&2
+            bad=1
+        fi
+    done
+    rm -rf "dist/$d.again"
+    return "$bad"
+}
+
 QUICK=(noai zizmor gitleaks fmt clippy doc test packaging e2e)
-ALL=("${QUICK[@]}" distro:fedora distro:archlinux distro:alpine)
+ALL=("${QUICK[@]}" distro:fedora distro:archlinux distro:alpine package)
 
 jobs=("$@")
 [ ${#jobs[@]} -eq 0 ] && jobs=("${QUICK[@]}")

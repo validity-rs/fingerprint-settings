@@ -1,6 +1,11 @@
-# Debian 13 (trixie): the reference platform. The `ci` stage (ci/run.sh
-# builds it with `docker build --target ci`) runs rustfmt, clippy, rustdoc
-# and the tests (ci/run.sh fmt clippy doc test distro:debian packaging e2e).
+# Debian 13 (trixie): the reference platform. Three stages, built with
+# `docker build --target <stage>` by ci/run.sh:
+#
+#   ci       rustfmt, clippy, rustdoc and the tests (ci/run.sh fmt clippy doc
+#            test distro:debian packaging e2e), and the vendored tarball
+#   package  builds the .deb from the tarball (cargo-deb) and checks it (lintian)
+#   install  a fresh Debian 13, where the .deb is installed, launched and
+#            removed (ci/packages/install.sh)
 #
 # Debian 13 is the oldest supported platform: GTK 4.18 and libadwaita 1.7,
 # which the crate's feature flags match. Debian's own rustc is older than the
@@ -15,6 +20,8 @@ FROM rust:1.99.1-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b65
 # dbus-daemon: the end-to-end test starts a private bus.
 # desktop-file-utils, appstream: the packaging job validates the desktop entry
 # and the metainfo.
+# The repository is mounted from the host, owned by another user: git (the
+# vendored tarball lists its files) must accept it.
 RUN rustup component add clippy rustfmt \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -24,9 +31,39 @@ RUN rustup component add clippy rustfmt \
         libadwaita-1-dev \
         libgtk-4-dev \
     && rm -rf /var/lib/apt/lists/* \
+    && git config --system --add safe.directory '*' \
     && rustc --version && cargo clippy --version && cargo fmt --version \
     && dbus-daemon --version | head -1 \
     && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/bash"]
+
+FROM ci AS package
+
+# cargo-deb: pinned version, built from crates.io with its own Cargo.lock
+# (--locked); crates.io checks every crate's checksum.
+# lintian: Debian's package checker.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends lintian \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install --locked cargo-deb --version 3.8.0 \
+    && rm -rf /usr/local/cargo/registry \
+    && cargo deb --version && lintian --version
+
+FROM debian:13.7@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308 AS install
+
+# What the smoke test needs around the package, nothing of the package's own:
+# a bus, a headless X server, xwininfo (x11-utils) to see the window, and the
+# validators for the installed desktop entry and metainfo.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        appstream \
+        dbus-daemon \
+        desktop-file-utils \
+        x11-utils \
+        xvfb \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 CMD ["/bin/bash"]

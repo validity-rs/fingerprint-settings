@@ -23,8 +23,11 @@ zbus = { version = "6.1.0", default-features = false, features = ["default-rt", 
 # and the deadlines of the calls (zbus's own runtime).
 zruntime = { version = "0.2.1", default-features = false, features = ["mpmc", "runtime"] }
 
-# No dev-dependencies: the end-to-end test against validity-rs's daemon is a
-# package of its own, e2e/, so that nothing here depends on validity-rs.
+[dev-dependencies]
+# examples/stub_service.rs serves the fprintd API (the packages' smoke test).
+# The end-to-end test against validity-rs's daemon is a package of its own,
+# e2e/, so that nothing here depends on validity-rs.
+zbus = { version = "6.1.0", default-features = false, features = ["default-rt", "proxy", "service"] }
 
 [lints.rust]
 # No warning is tolerated: a plain `cargo build/test/clippy/doc` fails on any.
@@ -38,3 +41,33 @@ all = { level = "deny", priority = -1 }
 
 [lints.rustdoc]
 all = { level = "deny", priority = -1 }
+
+# The Debian package (cargo-deb, built by ci/packages/debian.sh in the pinned
+# Debian 13 image). The translations are compiled into the binary: there are
+# no .mo files to ship.
+[package.metadata.deb]
+maintainer = "pierre-warnier <409744+pierre-warnier@users.noreply.github.com>"
+copyright = "2026 validity-rs contributors"
+license-file = ["LICENSE", "0"]
+section = "utils"
+priority = "optional"
+# $auto: the shared libraries the binary links (libgtk-4-1, libadwaita-1-0,
+# ...), found by dpkg-shlibdeps. Any service that speaks fprintd's API will
+# do; validity-rs's daemon is one.
+depends = "$auto, fprintd | validity-daemon"
+changelog = "packaging/debian/changelog"
+extended-description = """\
+A small desktop application to manage your own fingerprints: add one, name \
+it, test it, rename it, remove it. Made for desktops without fingerprint \
+settings of their own, such as Xfce, MATE and LXQt. It works with any \
+fingerprint service that speaks the fprintd D-Bus interface, fprintd itself \
+included. Your password always keeps working."""
+assets = [
+    ["target/release/fingerprint-settings", "usr/bin/", "755"],
+    ["packaging/common/io.github.validity_rs.FingerprintSettings.desktop", "usr/share/applications/", "644"],
+    ["packaging/common/io.github.validity_rs.FingerprintSettings.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["packaging/common/icons/hicolor/scalable/apps/io.github.validity_rs.FingerprintSettings.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["packaging/common/fingerprint-settings.1", "usr/share/man/man1/", "644"],
+    ["README.md", "usr/share/doc/fingerprint-settings/", "644"],
+    ["packaging/debian/lintian-overrides", "usr/share/lintian/overrides/fingerprint-settings", "644"],
+]
