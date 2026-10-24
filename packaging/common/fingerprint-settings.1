@@ -1,14 +1,13 @@
 .TH FINGERPRINT-SETTINGS 1 "2026-10-23" "fingerprint-settings 0.1.0" "User Commands"
 .SH NAME
-fingerprint-settings \- add, name, test and remove your own fingerprints
+fingerprint-settings \- register or remove your right index finger
 .SH SYNOPSIS
 .B fingerprint-settings
 .RB [ \-\-help ]
 .SH DESCRIPTION
 .B fingerprint-settings
-(\(lqFingerprints\(rq in the menus) is a desktop application to manage the
-fingerprints of the user who runs it: register a finger, give it a name, check
-that it is recognised, rename it, and remove it.
+(\(lqFingerprints\(rq in the menus) is a desktop application, one screen, with which the user who runs it
+registers their right index finger, or removes it.
 .PP
 It talks to any fingerprint service that speaks the fprintd D\-Bus interface
 (\fBnet.reactivated.Fprint\fR on the system bus): \fBfprintd\fR(1) itself, or
@@ -29,16 +28,10 @@ Show the standard GTK application options.
 .B LANGUAGE\fR, \fBLC_ALL\fR, \fBLC_MESSAGES\fR, \fBLANG
 The language of the window, as with gettext (English and French).
 .TP
-.B XDG_CONFIG_HOME
-Where the names are kept (default \fI~/.config\fR).
-.TP
 .B DBUS_SYSTEM_BUS_ADDRESS
 The bus the fingerprint service is on (default: the system bus).
 .SH FILES
-.TP
-.I $XDG_CONFIG_HOME/fingerprint-settings/names.toml
-The names given to the fingerprints, keyed by fprintd's finger names. The
-fingerprints themselves are kept by the fingerprint service, not here.
+None: the fingerprint is kept by the fingerprint service.
 .SH SEE ALSO
 .BR fprintd (1)
 .PP

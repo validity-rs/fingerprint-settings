@@ -329,7 +329,7 @@ fn the_lexer_finds_marked_strings() {
 fn every_user_visible_string_is_translated_into_french() {
     let (used, prose) = extract();
     assert!(
-        used.len() > 80,
+        used.len() >= 30,
         "only {} strings found: {used:?}",
         used.len()
     );

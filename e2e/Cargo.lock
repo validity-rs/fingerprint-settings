@@ -331,7 +331,6 @@ dependencies = [
  "futures-core",
  "gtk4",
  "libadwaita",
- "toml",
  "zbus",
  "zruntime",
 ]

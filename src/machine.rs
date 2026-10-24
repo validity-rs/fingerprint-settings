@@ -1,9 +1,10 @@
 //! The application's state machine, free of any UI and of D-Bus itself.
 //!
+//! The application manages one fingerprint: the user's right index finger.
 //! [`Model::update`] takes an [`Input`] (something the user did, or a reply or
 //! signal from the fingerprint service) and returns the [`Command`]s to send
-//! to the service. The model is the view state: the UI shows [`Model::page`],
-//! [`Model::dialog`] and [`Model::fingers`] as they are.
+//! to the service. The model is the view state: the UI shows
+//! [`Model::status`], [`Model::activity`] and [`Model::message`] as they are.
 //!
 //! The service is used one call at a time: a command is only issued once the
 //! input answering the previous one arrived. Inputs that do not fit the
@@ -12,34 +13,22 @@
 //! Every path that claimed the device releases it, whatever happens next
 //! (cancel, failure, error), unless the service itself went away. A Claim
 //! that timed out is released too: the service may have claimed the device
-//! after the application stopped waiting.
-//!
-//! The model also owns the names the user gave their fingerprints
-//! ([`Model::labels`]). A name follows its slot: it is set when an
-//! enrolment completes or on rename, and dropped when the fingerprint is
-//! removed or no longer listed. The model does no I/O: the UI saves the names
-//! when [`Model::take_labels_to_save`] returns them.
+//! after the application stopped waiting. Whatever fails, the model goes
+//! back to [`Activity::Idle`] with a sentence in [`Model::message`]: the
+//! application stays usable.
 
 use crate::error::{ErrorKind, ServiceError};
-use crate::fingers::{self, Finger};
-use crate::labels::{self, Labels};
-use crate::message::{Arg, Message, msg};
-use crate::status::{self, EnrollResult, ScanType, VerifyResult};
+use crate::message::{Message, msg};
+use crate::status::{self, EnrollResult};
 
-/// What the service says about its reader.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeviceInfo {
-    /// The product name.
-    pub name: String,
-    /// Press or swipe.
-    pub scan: ScanType,
-}
+/// The fprintd name of the one finger the application manages.
+pub const FINGER: &str = "right-index-finger";
 
 /// A call to make on the fingerprint service.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
-    /// Find the default reader (`Manager.GetDefaultDevice`) and read its
-    /// properties; answered by [`Input::Connected`].
+    /// Find the default reader (`Manager.GetDefaultDevice`); answered by
+    /// [`Input::Connected`].
     Connect,
     /// `ListEnrolledFingers("")`; answered by [`Input::Listed`].
     List,
@@ -47,17 +36,14 @@ pub enum Command {
     Claim,
     /// `Release()`; answered by [`Input::Released`].
     Release,
-    /// `EnrollStart(finger)`; answered by [`Input::EnrollStarted`].
-    EnrollStart(Finger),
+    /// `EnrollStart(FINGER)`; answered by [`Input::EnrollStarted`].
+    EnrollStart,
     /// `EnrollStop()`; answered by [`Input::EnrollStopped`].
     EnrollStop,
-    /// `VerifyStart("any")`; answered by [`Input::VerifyStarted`].
-    VerifyStart,
-    /// `VerifyStop()`; answered by [`Input::VerifyStopped`].
-    VerifyStop,
-    /// `DeleteEnrolledFinger(finger)`; answered by [`Input::Deleted`].
-    DeleteFinger(Finger),
-    /// `DeleteEnrolledFingers2()`; answered by [`Input::Deleted`].
+    /// `DeleteEnrolledFinger(FINGER)`; answered by [`Input::Deleted`].
+    DeleteFinger,
+    /// `DeleteEnrolledFingers2()`, for services without
+    /// `DeleteEnrolledFinger`; answered by [`Input::Deleted`].
     DeleteAll,
 }
 
@@ -65,43 +51,21 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
     // ---- the user
-    /// Start, or look for the reader again.
+    /// The window opened: find the reader and read what is enrolled.
     Start,
-    /// "Add a fingerprint": opens the add page.
-    AddFinger,
-    /// "Start" on the add page: the finger chosen (`None`: "just a name, any
-    /// finger", the application picks a free slot) and the name given
-    /// (`None`: the finger's standard name). Without a finger, a name is
-    /// required.
-    StartEnroll {
-        /// The finger, if the user chose one.
-        finger: Option<Finger>,
-        /// The name, if the user gave one other than the standard name.
-        label: Option<String>,
-    },
-    /// "Rename" on an enrolled fingerprint: opens the rename dialog.
-    RenameFinger(Finger),
-    /// The rename dialog's answer: the new name (`None`: back to the
-    /// finger's standard name).
-    SetLabel(Finger, Option<String>),
-    /// "Test a finger".
-    TestFinger,
-    /// "Remove" on an enrolled finger: asks for confirmation.
-    RemoveFinger(Finger),
-    /// The dialog's main button (confirm, or "OK" on an error).
-    Confirm,
-    /// The dialog's cancel button, or the dialog was closed.
-    Dismiss,
-    /// "Cancel" during an operation, or "back" on a page that has one.
+    /// "Register my right index finger".
+    Enroll,
+    /// "Remove".
+    Remove,
+    /// "Cancel" during an enrolment (or the window is closing).
     Cancel,
-    /// "Try again" after a failure or a test.
-    TryAgain,
 
     // ---- the service
     /// The answer to [`Command::Connect`].
-    Connected(Result<DeviceInfo, ServiceError>),
-    /// The answer to [`Command::List`] (no enrolled prints is an empty list).
-    Listed(Result<Vec<Finger>, ServiceError>),
+    Connected(Result<(), ServiceError>),
+    /// The answer to [`Command::List`]: the enrolled fingers' fprintd names
+    /// (no enrolled prints is an empty list).
+    Listed(Result<Vec<String>, ServiceError>),
     /// The answer to [`Command::Claim`]: the number of enrolment stages, when
     /// the device says (`num-enroll-stages` > 0).
     Claimed(Result<Option<u32>, ServiceError>),
@@ -113,17 +77,10 @@ pub enum Input {
     EnrollStatus(String, bool),
     /// The answer to [`Command::EnrollStop`].
     EnrollStopped(Result<(), ServiceError>),
-    /// The answer to [`Command::VerifyStart`].
-    VerifyStarted(Result<(), ServiceError>),
-    /// The `VerifyFingerSelected` signal.
-    VerifyFingerSelected(String),
-    /// The `VerifyStatus` signal: result and done.
-    VerifyStatus(String, bool),
-    /// The answer to [`Command::VerifyStop`].
-    VerifyStopped(Result<(), ServiceError>),
     /// The answer to [`Command::DeleteFinger`] or [`Command::DeleteAll`].
     Deleted(Result<(), ServiceError>),
-    /// The service left the bus (it crashed, or was stopped).
+    /// The service left the bus (it crashed, was stopped, or exited when
+    /// idle, as fprintd does).
     ServiceLost,
 }
 
@@ -132,83 +89,30 @@ pub enum Input {
 pub enum Step {
     /// `Claim` sent.
     Claiming,
-    /// `EnrollStart` / `VerifyStart` sent.
+    /// `EnrollStart` or a delete sent.
     Starting,
     /// Waiting for the finger.
     Scanning,
-    /// `EnrollStop` / `VerifyStop` sent.
+    /// `EnrollStop` sent.
     Stopping,
     /// `Release` sent.
     Releasing,
-    /// Over: the outcome is shown.
-    Done,
 }
 
-/// Why something failed, ready to show.
+/// How an enrolment ended (decided before the release).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Failure {
-    /// The short title.
-    pub title: Message,
-    /// What happened and what to do.
-    pub description: Message,
-    /// The technical detail, shown only on request.
-    pub detail: Option<String>,
-}
-
-impl Failure {
-    /// From a service error.
-    pub fn service(e: &ServiceError) -> Self {
-        Failure {
-            title: e.title(),
-            description: e.description(),
-            detail: Some(e.detail.clone()),
-        }
-    }
-
-    fn enroll(description: Message) -> Self {
-        Failure {
-            title: msg("The finger was not added"),
-            description,
-            detail: None,
-        }
-    }
-
-    fn test(description: Message) -> Self {
-        Failure {
-            title: msg("The test did not work"),
-            description,
-            detail: None,
-        }
-    }
-}
-
-/// How an enrolment ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnrollOutcome {
+pub enum Outcome {
     /// The finger is enrolled.
     Completed,
     /// The user cancelled.
     Cancelled,
-    /// It failed. `duplicate`: the print exists already, so trying the same
-    /// finger again is pointless.
-    Failed {
-        /// What to show.
-        failure: Failure,
-        /// The print is already enrolled.
-        duplicate: bool,
-    },
+    /// It failed: what to tell the user.
+    Failed(Message),
 }
 
-/// The enrolment page.
+/// An enrolment in progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enroll {
-    /// The fprintd slot the fingerprint goes into.
-    pub slot: Finger,
-    /// The finger the user chose (`None`: they only gave a name, so the
-    /// instructions do not name a finger).
-    pub finger: Option<Finger>,
-    /// The name it will have (`None`: the slot's standard name).
-    pub label: Option<String>,
     /// The number of good scans needed, when the device says.
     pub stages: Option<u32>,
     /// Good scans so far.
@@ -218,211 +122,75 @@ pub struct Enroll {
     /// What to tell the user now.
     pub instruction: Message,
     /// How it ended (set from the moment it is decided).
-    pub outcome: Option<EnrollOutcome>,
+    pub outcome: Option<Outcome>,
     cancel: bool,
 }
 
 impl Enroll {
     /// Progress from 0 to 1 (`None`: the number of stages is unknown).
     pub fn fraction(&self) -> Option<f64> {
-        if self.outcome == Some(EnrollOutcome::Completed) {
+        if self.outcome == Some(Outcome::Completed) {
             return Some(1.0);
         }
         self.stages
             .map(|n| (f64::from(self.passed) / f64::from(n)).clamp(0.0, 1.0))
     }
 
-    /// The progress in words: "Step 2 of 6", or the number of good scans
-    /// when the device does not say how many it needs.
-    pub fn progress_text(&self) -> Message {
-        match self.stages {
-            Some(total) => {
-                let step = if self.outcome == Some(EnrollOutcome::Completed) {
-                    total
-                } else {
-                    (self.passed + 1).min(total)
-                };
-                msg("Step {step} of {total}")
-                    .with("step", Arg::Number(step))
-                    .with("total", Arg::Number(total))
-            }
-            None => msg("Good scans so far: {count}").with("count", Arg::Number(self.passed)),
-        }
+    /// Whether "Cancel" still means something: the enrolment is not stopping
+    /// or over already.
+    pub fn cancellable(&self) -> bool {
+        self.outcome.is_none()
     }
-
-    /// The name it will have, for messages.
-    pub fn name(&self) -> Arg {
-        match &self.label {
-            Some(l) => Arg::Text(l.clone()),
-            None => Arg::Finger(self.slot),
-        }
-    }
-
-    /// The page title.
-    pub fn title(&self) -> Message {
-        msg("Adding \u{201c}{name}\u{201d}").with("name", self.name())
-    }
-}
-
-/// How a test ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestOutcome {
-    /// Recognised; the finger when the service said which one it checked.
-    Match(Option<Finger>),
-    /// Not recognised.
-    NoMatch,
-    /// The user cancelled.
-    Cancelled,
-    /// It failed.
-    Failed(Failure),
-}
-
-impl TestOutcome {
-    /// The result in words, with the fingerprints' names: title and
-    /// explanation.
-    pub fn texts(&self, labels: &Labels) -> Option<(Message, Message)> {
-        Some(match self {
-            TestOutcome::Match(Some(f)) => (
-                msg("Recognised: {name}").with("name", name_of(labels, *f)),
-                msg("This finger can unlock the computer."),
-            ),
-            TestOutcome::Match(None) => (
-                msg("Recognised"),
-                msg("This is one of your registered fingers. It can unlock the computer."),
-            ),
-            TestOutcome::NoMatch => (
-                msg("Not recognised"),
-                msg("This finger is not registered, or it was not placed well. You can try again."),
-            ),
-            TestOutcome::Failed(f) => (f.title.clone(), f.description.clone()),
-            TestOutcome::Cancelled => return None,
-        })
-    }
-}
-
-/// The test page.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Test {
-    /// Where it is.
-    pub step: Step,
-    /// The finger the service checks (`None`: any enrolled finger).
-    pub selected: Option<Finger>,
-    /// What to tell the user now.
-    pub instruction: Message,
-    /// How it ended.
-    pub outcome: Option<TestOutcome>,
-    cancel: bool,
 }
 
 /// What a removal ended with, before the release.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum RemoveResult {
-    Removed,
-    /// The service lacks `DeleteEnrolledFinger`: only "remove all" is possible.
-    NeedsAll,
+enum Removed {
+    Yes,
     Failed(ServiceError),
 }
 
-/// The removal in progress.
+/// A removal in progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Remove {
-    /// The finger the user asked to remove.
-    pub finger: Finger,
-    /// Every print of the user is being removed (older services).
+    /// Every print of the user is being removed (services without
+    /// `DeleteEnrolledFinger`).
     pub all: bool,
     /// Where it is (`Claiming`, `Starting` = deleting, `Releasing`).
     pub step: Step,
-    result: Option<RemoveResult>,
+    result: Option<Removed>,
 }
 
-/// The page shown.
+/// What the application is doing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Page {
-    /// Looking for the reader.
-    Loading,
-    /// The reader or the service cannot be used.
-    Problem(Failure),
-    /// The enrolled fingers (or the empty state).
-    Fingers,
-    /// Adding a fingerprint: choosing the finger and the name.
-    Add,
-    /// Adding a finger.
-    Enroll(Enroll),
-    /// Testing a finger.
-    Test(Test),
-    /// Removing a finger (the fingers page, busy).
+pub enum Activity {
+    /// Looking for the reader and reading what is enrolled. `then_enroll`:
+    /// the user asked to enrol while no reader was found, so the enrolment
+    /// starts once it is.
+    Loading {
+        /// Enrol once connected.
+        then_enroll: bool,
+    },
+    /// Nothing: waiting for the user.
+    Idle,
+    /// Enrolling the right index finger.
+    Enrolling(Enroll),
+    /// Removing it.
     Removing(Remove),
-}
-
-/// A dialog over the page.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Dialog {
-    /// "Remove this fingerprint?"
-    ConfirmRemove(Finger),
-    /// "Rename this fingerprint": the UI adds the text field, prefilled with
-    /// [`Model::display_name`].
-    Rename(Finger),
-    /// The service can only remove every print at once: "Remove all?"
-    ConfirmRemoveAll(Finger),
-    /// Something failed.
-    Error(Failure),
-}
-
-impl Dialog {
-    /// Title, body, confirm button label, and the cancel button's ("Cancel";
-    /// `None` for an error, which has only "OK"), with the fingerprints'
-    /// names.
-    pub fn texts(&self, labels: &Labels) -> (Message, Message, Message, Option<Message>) {
-        match self {
-            Dialog::ConfirmRemove(f) => (
-                msg("Remove this fingerprint?"),
-                msg("\u{201c}{name}\u{201d} will no longer unlock this computer. You can add it again later.")
-                    .with("name", name_of(labels, *f)),
-                msg("Remove"),
-                Some(msg("Cancel")),
-            ),
-            Dialog::Rename(_) => (
-                msg("Rename this fingerprint"),
-                msg("Choose a name you will recognise. Leave it empty to use the finger's name."),
-                msg("Rename"),
-                Some(msg("Cancel")),
-            ),
-            Dialog::ConfirmRemoveAll(_) => (
-                msg("Remove all your fingerprints?"),
-                msg("This fingerprint service can only remove all your fingerprints at once, not a single one. You can add the others again afterwards."),
-                msg("Remove all"),
-                Some(msg("Cancel")),
-            ),
-            Dialog::Error(f) => (f.title.clone(), f.description.clone(), msg("OK"), None),
-        }
-    }
 }
 
 /// The application state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Model {
-    /// The page shown.
-    pub page: Page,
-    /// A dialog over it.
-    pub dialog: Option<Dialog>,
-    /// The user's enrolled fingers, in [`Finger::ALL`] order.
-    pub fingers: Vec<Finger>,
-    /// The reader, once found.
-    pub device: Option<DeviceInfo>,
-    /// A short notice to show once ("Fingerprint removed"); the UI takes it.
-    pub notice: Option<Message>,
-    /// The names the user gave their fingerprints (see [`labels`]).
-    pub labels: Labels,
-    /// The names changed and should be saved.
-    labels_changed: bool,
-}
-
-/// The name of slot `f`: the user's, else the finger's standard name.
-pub fn name_of(labels: &Labels, f: Finger) -> Arg {
-    match labels.get(&f) {
-        Some(l) => Arg::Text(l.clone()),
-        None => Arg::Finger(f),
-    }
+    /// What it is doing.
+    pub activity: Activity,
+    /// A reader was found (the service may still exit when idle; it is
+    /// started again on the next call).
+    pub connected: bool,
+    /// Whether the right index finger is enrolled (`None`: not known yet).
+    pub enrolled: Option<bool>,
+    /// The last result or error, in one sentence.
+    pub message: Option<Message>,
 }
 
 impl Default for Model {
@@ -434,334 +202,193 @@ impl Default for Model {
 impl Model {
     /// The state before [`Input::Start`].
     pub fn new() -> Self {
-        Model::with_labels(Labels::new())
-    }
-
-    /// The state before [`Input::Start`], with the names read from the
-    /// user's configuration.
-    pub fn with_labels(labels: Labels) -> Self {
         Model {
-            page: Page::Loading,
-            dialog: None,
-            fingers: Vec::new(),
-            device: None,
-            notice: None,
-            labels,
-            labels_changed: false,
+            activity: Activity::Loading { then_enroll: false },
+            connected: false,
+            enrolled: None,
+            message: None,
         }
     }
 
-    /// The name of an enrolled fingerprint, for messages.
-    pub fn display_name(&self, f: Finger) -> Arg {
-        name_of(&self.labels, f)
-    }
-
-    /// The names, when they changed since the last call: the UI saves them.
-    pub fn take_labels_to_save(&mut self) -> Option<Labels> {
-        std::mem::take(&mut self.labels_changed).then(|| self.labels.clone())
-    }
-
-    fn set_label(&mut self, f: Finger, label: Option<String>) {
-        let before = self.labels.get(&f).cloned();
-        match label.as_deref().and_then(labels::clean) {
-            Some(l) => {
-                self.labels.insert(f, l);
+    /// The status line (`None` while it is not known).
+    pub fn status(&self) -> Option<Message> {
+        self.enrolled.map(|e| {
+            if e {
+                msg("Right index finger registered")
+            } else {
+                msg("No fingerprint registered")
             }
-            None => {
-                self.labels.remove(&f);
-            }
-        }
-        if self.labels.get(&f) != before.as_ref() {
-            self.labels_changed = true;
-        }
+        })
     }
 
-    /// The finger the add page selects first: the first free one, indexes
-    /// and thumbs first (`None`: all ten are enrolled).
-    pub fn default_choice(&self) -> Option<Finger> {
-        fingers::free_slot(&self.fingers)
+    /// Whether "Register my right index finger" can be used now.
+    pub fn can_enroll(&self) -> bool {
+        self.activity == Activity::Idle && self.enrolled != Some(true)
     }
 
-    fn scan(&self) -> ScanType {
-        self.device.as_ref().map(|d| d.scan).unwrap_or_default()
+    /// Whether "Remove" is shown: the finger is enrolled.
+    pub fn shows_remove(&self) -> bool {
+        self.enrolled == Some(true)
     }
 
-    /// Whether a call is in flight or the device is claimed: closing now
-    /// should cancel first and wait for the release.
+    /// Whether "Remove" can be used now.
+    pub fn can_remove(&self) -> bool {
+        self.activity == Activity::Idle && self.shows_remove()
+    }
+
+    /// Whether a call is in flight or the device is claimed.
     pub fn busy(&self) -> bool {
-        match &self.page {
-            Page::Loading => true,
-            Page::Enroll(e) => e.step != Step::Done,
-            Page::Test(t) => t.step != Step::Done,
-            Page::Removing(_) => true,
-            Page::Problem(_) | Page::Fingers | Page::Add => false,
-        }
+        self.activity != Activity::Idle
     }
 
-    /// Whether the device is claimed, or may be: an enrolment, a test or a
-    /// removal is under way. Closing the window then cancels first and waits
-    /// for the release.
+    /// Whether the device is claimed, or may be: an enrolment or a removal
+    /// is under way. Closing the window then cancels first and waits for the
+    /// release.
     pub fn holds_reader(&self) -> bool {
-        match &self.page {
-            Page::Enroll(e) => e.step != Step::Done,
-            Page::Test(t) => t.step != Step::Done,
-            Page::Removing(_) => true,
-            Page::Loading | Page::Problem(_) | Page::Fingers | Page::Add => false,
-        }
-    }
-
-    /// Whether `finger` is enrolled.
-    pub fn is_enrolled(&self, finger: Finger) -> bool {
-        self.fingers.contains(&finger)
-    }
-
-    /// Takes the pending notice.
-    pub fn take_notice(&mut self) -> Option<Message> {
-        self.notice.take()
+        matches!(
+            self.activity,
+            Activity::Enrolling(_) | Activity::Removing(_)
+        )
     }
 
     /// Applies `input`; returns the calls to make, in order.
     pub fn update(&mut self, input: Input) -> Vec<Command> {
-        // Inputs that do not depend on the page.
         match input {
             Input::Start => {
-                self.page = Page::Loading;
-                self.dialog = None;
+                if self.holds_reader() {
+                    return vec![];
+                }
+                self.activity = Activity::Loading { then_enroll: false };
+                self.message = None;
                 return vec![Command::Connect];
             }
             Input::Connected(r) => return self.connected(r),
             Input::Listed(r) => return self.listed(r),
-            Input::Dismiss => {
-                self.dialog = None;
+            Input::ServiceLost => {
+                self.service_lost();
                 return vec![];
             }
-            Input::Confirm if self.dialog.is_some() => return self.confirm(),
-            Input::ServiceLost => return self.service_lost(),
             _ => {}
         }
-        let page = std::mem::replace(&mut self.page, Page::Loading);
-        let (page, cmds) = match page {
-            Page::Enroll(e) => self.enroll(e, input),
-            Page::Test(t) => self.test(t, input),
-            Page::Removing(r) => self.removing(r, input),
-            Page::Fingers => self.fingers_page(input),
-            Page::Add => match input {
-                Input::StartEnroll { finger, label } => self.choose(finger, label),
-                Input::Cancel => (Page::Fingers, vec![]),
-                _ => (Page::Add, vec![]),
-            },
-            Page::Problem(p) => match input {
-                Input::TryAgain => (Page::Loading, vec![Command::Connect]),
-                _ => (Page::Problem(p), vec![]),
-            },
-            Page::Loading => (Page::Loading, vec![]),
+        let activity = std::mem::replace(&mut self.activity, Activity::Idle);
+        let (activity, cmds) = match activity {
+            Activity::Idle => self.idle(input),
+            Activity::Enrolling(e) => self.enroll(e, input),
+            Activity::Removing(r) => self.removing(r, input),
+            loading @ Activity::Loading { .. } => (loading, vec![]),
         };
-        self.page = page;
+        self.activity = activity;
         cmds
     }
 
-    fn connected(&mut self, r: Result<DeviceInfo, ServiceError>) -> Vec<Command> {
-        if self.page != Page::Loading {
+    fn connected(&mut self, r: Result<(), ServiceError>) -> Vec<Command> {
+        if !matches!(self.activity, Activity::Loading { .. }) {
             return vec![];
         }
         match r {
-            Ok(info) => {
-                self.device = Some(info);
+            Ok(()) => {
+                self.connected = true;
                 vec![Command::List]
             }
             Err(e) => {
-                self.device = None;
-                self.page = Page::Problem(Failure::service(&e));
+                self.connected = false;
+                self.activity = Activity::Idle;
+                self.message = Some(e.message());
                 vec![]
             }
         }
     }
 
-    fn listed(&mut self, r: Result<Vec<Finger>, ServiceError>) -> Vec<Command> {
-        match r {
-            Ok(mut v) => {
-                v.sort();
-                v.dedup();
-                self.fingers = v;
-                self.forget_unenrolled_labels();
-            }
-            Err(e) if e.kind == ErrorKind::NoPrints => {
-                self.fingers.clear();
-                self.forget_unenrolled_labels();
-            }
-            Err(e) => {
-                // A failed list during an operation changes nothing there.
-                if matches!(self.page, Page::Loading | Page::Fingers | Page::Add) {
-                    self.page = Page::Problem(Failure::service(&e));
+    fn listed(&mut self, r: Result<Vec<String>, ServiceError>) -> Vec<Command> {
+        let then_enroll = match self.activity {
+            Activity::Loading { then_enroll } => then_enroll,
+            // A refresh after an operation: the answer only updates the status.
+            _ => {
+                if let Ok(names) = r {
+                    self.enrolled = Some(names.iter().any(|n| n == FINGER));
                 }
                 return vec![];
             }
+        };
+        match r {
+            Ok(names) => {
+                let enrolled = names.iter().any(|n| n == FINGER);
+                self.enrolled = Some(enrolled);
+                if then_enroll && !enrolled {
+                    let (a, cmds) = start_enroll();
+                    self.activity = a;
+                    return cmds;
+                }
+            }
+            Err(e) if e.kind == ErrorKind::NoPrints => self.enrolled = Some(false),
+            Err(e) => self.message = Some(e.message()),
         }
-        if self.page == Page::Loading {
-            self.page = Page::Fingers;
-        }
+        self.activity = Activity::Idle;
         vec![]
     }
 
-    /// Names of slots that are not enrolled (any more) are dropped: the
-    /// fingerprint was removed elsewhere, or never finished.
-    fn forget_unenrolled_labels(&mut self) {
-        let before = self.labels.len();
-        let fingers = &self.fingers;
-        self.labels.retain(|f, _| fingers.contains(f));
-        if self.labels.len() != before {
-            self.labels_changed = true;
-        }
-    }
-
-    fn confirm(&mut self) -> Vec<Command> {
-        // The rename dialog answers with SetLabel, which carries the text.
-        if matches!(self.dialog, Some(Dialog::Rename(_))) {
-            return vec![];
-        }
-        // Only from the fingers page: nothing else is running.
-        let dialog = self.dialog.take();
-        if self.page != Page::Fingers {
-            return vec![];
-        }
-        let (finger, all) = match dialog {
-            Some(Dialog::ConfirmRemove(f)) => (f, false),
-            Some(Dialog::ConfirmRemoveAll(f)) => (f, true),
-            _ => return vec![],
-        };
-        self.page = Page::Removing(Remove {
-            finger,
-            all,
-            step: Step::Claiming,
-            result: None,
-        });
-        vec![Command::Claim]
-    }
-
-    fn service_lost(&mut self) -> Vec<Command> {
-        let lost = ServiceError::new(ErrorKind::Unavailable, "the service left the bus");
-        match &mut self.page {
+    fn service_lost(&mut self) {
+        let lost = ServiceError::new(ErrorKind::Unavailable, "the service left the bus").message();
+        match &self.activity {
             // The claim went with the service: nothing to release.
-            Page::Enroll(e) if e.step != Step::Done => {
-                e.step = Step::Done;
-                match e.outcome {
-                    Some(EnrollOutcome::Cancelled) => self.page = Page::Fingers,
+            Activity::Enrolling(e) => {
+                self.message = match &e.outcome {
+                    Some(Outcome::Cancelled) => Some(msg("Registration cancelled.")),
                     // Completed stays completed: the print is stored.
-                    Some(_) => {}
-                    None => {
-                        e.outcome = Some(EnrollOutcome::Failed {
-                            failure: Failure::service(&lost),
-                            duplicate: false,
-                        });
+                    Some(Outcome::Completed) => {
+                        self.enrolled = Some(true);
+                        Some(msg("Registration complete."))
                     }
-                }
+                    Some(Outcome::Failed(m)) => Some(m.clone()),
+                    None => Some(lost),
+                };
+                self.activity = Activity::Idle;
             }
-            Page::Test(t) if t.step != Step::Done => {
-                t.step = Step::Done;
-                match t.outcome {
-                    Some(TestOutcome::Cancelled) => self.page = Page::Fingers,
-                    Some(_) => {}
-                    None => t.outcome = Some(TestOutcome::Failed(Failure::service(&lost))),
-                }
-            }
-            Page::Removing(_) => {
-                self.page = Page::Fingers;
-                self.dialog = Some(Dialog::Error(Failure::service(&lost)));
+            Activity::Removing(_) => {
+                self.message = Some(lost);
+                self.activity = Activity::Idle;
             }
             // Idle: fprintd exits when unused and is started again on demand.
-            _ => {}
+            Activity::Idle | Activity::Loading { .. } => {}
         }
-        vec![]
     }
 
-    fn fingers_page(&mut self, input: Input) -> (Page, Vec<Command>) {
-        if let Some(Dialog::Rename(f)) = self.dialog
-            && let Input::SetLabel(g, label) = &input
-            && *g == f
-        {
-            self.dialog = None;
-            self.set_label(f, label.clone());
-            self.notice =
-                Some(msg("Fingerprint renamed: {name}").with("name", self.display_name(f)));
-            return (Page::Fingers, vec![]);
-        }
-        if self.dialog.is_some() {
-            return (Page::Fingers, vec![]);
-        }
+    fn idle(&mut self, input: Input) -> (Activity, Vec<Command>) {
         match input {
-            Input::AddFinger if self.fingers.len() < Finger::ALL.len() => (Page::Add, vec![]),
-            Input::RenameFinger(f) if self.is_enrolled(f) => {
-                self.dialog = Some(Dialog::Rename(f));
-                (Page::Fingers, vec![])
+            Input::Enroll if self.can_enroll() => {
+                self.message = None;
+                if !self.connected {
+                    // No reader found so far: look again, then enrol.
+                    return (
+                        Activity::Loading { then_enroll: true },
+                        vec![Command::Connect],
+                    );
+                }
+                start_enroll()
             }
-            Input::TestFinger if !self.fingers.is_empty() => self.start_test(),
-            Input::RemoveFinger(f) if self.is_enrolled(f) => {
-                self.dialog = Some(Dialog::ConfirmRemove(f));
-                (Page::Fingers, vec![])
+            Input::Remove if self.can_remove() && self.connected => {
+                self.message = None;
+                (
+                    Activity::Removing(Remove {
+                        all: false,
+                        step: Step::Claiming,
+                        result: None,
+                    }),
+                    vec![Command::Claim],
+                )
             }
-            _ => (Page::Fingers, vec![]),
+            _ => (Activity::Idle, vec![]),
         }
     }
 
-    /// "Start" on the add page.
-    fn choose(&self, finger: Option<Finger>, label: Option<String>) -> (Page, Vec<Command>) {
-        let label = label.as_deref().and_then(labels::clean);
-        let slot = match finger {
-            Some(f) if !self.is_enrolled(f) => f,
-            // Without a finger, the name is all there is: it is required.
-            None if label.is_some() => match fingers::free_slot(&self.fingers) {
-                Some(f) => f,
-                None => return (Page::Add, vec![]),
-            },
-            _ => return (Page::Add, vec![]),
-        };
-        self.start_enroll(slot, finger, label)
-    }
-
-    fn start_enroll(
-        &self,
-        slot: Finger,
-        finger: Option<Finger>,
-        label: Option<String>,
-    ) -> (Page, Vec<Command>) {
-        (
-            Page::Enroll(Enroll {
-                slot,
-                finger,
-                label,
-                stages: None,
-                passed: 0,
-                step: Step::Claiming,
-                instruction: msg("Getting the reader ready…"),
-                outcome: None,
-                cancel: false,
-            }),
-            vec![Command::Claim],
-        )
-    }
-
-    fn start_test(&self) -> (Page, Vec<Command>) {
-        (
-            Page::Test(Test {
-                step: Step::Claiming,
-                selected: None,
-                instruction: msg("Getting the reader ready…"),
-                outcome: None,
-                cancel: false,
-            }),
-            vec![Command::Claim],
-        )
-    }
-
-    fn enroll(&mut self, mut e: Enroll, input: Input) -> (Page, Vec<Command>) {
-        let scan = self.scan();
+    fn enroll(&mut self, mut e: Enroll, input: Input) -> (Activity, Vec<Command>) {
         let release = |mut e: Enroll| {
             e.step = Step::Releasing;
-            (Page::Enroll(e), vec![Command::Release])
+            (Activity::Enrolling(e), vec![Command::Release])
         };
         let stop = |mut e: Enroll| {
             e.step = Step::Stopping;
-            (Page::Enroll(e), vec![Command::EnrollStop])
+            (Activity::Enrolling(e), vec![Command::EnrollStop])
         };
         match (e.step, input) {
             (Step::Claiming, Input::Claimed(Ok(stages))) => {
@@ -770,33 +397,28 @@ impl Model {
                     return release(e);
                 }
                 e.step = Step::Starting;
-                let slot = e.slot;
-                (Page::Enroll(e), vec![Command::EnrollStart(slot)])
+                (Activity::Enrolling(e), vec![Command::EnrollStart])
             }
             (Step::Claiming, Input::Claimed(Err(err))) => {
                 if !e.cancel {
-                    e.outcome = Some(enroll_service_failure(&err));
+                    e.outcome = Some(Outcome::Failed(err.message()));
                 }
                 if may_hold_claim(&err) {
                     return release(e);
                 }
-                e.step = Step::Done;
-                if e.cancel {
-                    return (Page::Fingers, vec![]);
-                }
-                (Page::Enroll(e), vec![])
+                self.finish_enroll(e)
             }
             (Step::Starting, Input::EnrollStarted(Ok(()))) => {
                 if e.cancel {
                     return stop(e);
                 }
                 e.step = Step::Scanning;
-                e.instruction = status::enroll_first(e.finger, scan);
-                (Page::Enroll(e), vec![])
+                e.instruction = status::enroll_first();
+                (Activity::Enrolling(e), vec![])
             }
             (Step::Starting, Input::EnrollStarted(Err(err))) => {
                 if !e.cancel {
-                    e.outcome = Some(enroll_service_failure(&err));
+                    e.outcome = Some(Outcome::Failed(err.message()));
                 }
                 release(e)
             }
@@ -810,29 +432,24 @@ impl Model {
                             e.passed = e.passed.min(n.saturating_sub(1));
                         }
                     }
-                    if let Some(i) = r.instruction(scan) {
+                    if let Some(i) = r.instruction(e.passed, e.stages) {
                         e.instruction = i;
                     }
-                    return (Page::Enroll(e), vec![]);
+                    return (Activity::Enrolling(e), vec![]);
                 }
                 if e.cancel {
                     // Still starting, and a stop is already decided: it goes
                     // out with the reply to EnrollStart.
-                    return (Page::Enroll(e), vec![]);
+                    return (Activity::Enrolling(e), vec![]);
                 }
-                e.outcome = Some(match r {
-                    EnrollResult::Completed => {
+                e.outcome = Some(match r.failure() {
+                    None if r == EnrollResult::Completed => {
                         if let Some(n) = e.stages {
                             e.passed = n;
                         }
-                        EnrollOutcome::Completed
+                        Outcome::Completed
                     }
-                    ref other => EnrollOutcome::Failed {
-                        failure: Failure::enroll(
-                            other.failure().unwrap_or_else(status::unknown_error),
-                        ),
-                        duplicate: *other == EnrollResult::Duplicate,
-                    },
+                    other => Outcome::Failed(other.unwrap_or_else(status::unknown_error)),
                 });
                 if r == EnrollResult::Disconnected {
                     // fprintd: nothing more should be done with the device but
@@ -843,224 +460,112 @@ impl Model {
                     // The reply to EnrollStart is still to come; it will see
                     // the outcome and stop.
                     e.cancel = true;
-                    return (Page::Enroll(e), vec![]);
+                    return (Activity::Enrolling(e), vec![]);
                 }
                 stop(e)
             }
             (Step::Claiming | Step::Starting, Input::Cancel) => {
                 e.cancel = true;
                 if e.outcome.is_none() {
-                    e.outcome = Some(EnrollOutcome::Cancelled);
+                    e.outcome = Some(Outcome::Cancelled);
                 }
-                (Page::Enroll(e), vec![])
+                (Activity::Enrolling(e), vec![])
             }
             (Step::Scanning, Input::Cancel) => {
                 e.cancel = true;
-                e.outcome = Some(EnrollOutcome::Cancelled);
+                e.outcome = Some(Outcome::Cancelled);
                 stop(e)
             }
             (Step::Stopping, Input::EnrollStopped(_)) => release(e),
-            (Step::Releasing, Input::Released(_)) => {
-                e.step = Step::Done;
-                match e.outcome {
-                    Some(EnrollOutcome::Completed) => {
-                        if !self.fingers.contains(&e.slot) {
-                            self.fingers.push(e.slot);
-                            self.fingers.sort();
-                        }
-                        // The name follows the slot.
-                        self.set_label(e.slot, e.label.clone());
-                        (Page::Enroll(e), vec![Command::List])
-                    }
-                    Some(EnrollOutcome::Cancelled) | None => (Page::Fingers, vec![Command::List]),
-                    Some(EnrollOutcome::Failed { .. }) => (Page::Enroll(e), vec![]),
-                }
-            }
-            (Step::Done, Input::Cancel) => (Page::Fingers, vec![]),
-            (Step::Done, Input::TryAgain) => match e.outcome {
-                Some(EnrollOutcome::Failed {
-                    duplicate: false, ..
-                }) if !self.is_enrolled(e.slot) => {
-                    self.start_enroll(e.slot, e.finger, e.label.clone())
-                }
-                _ => (Page::Enroll(e), vec![]),
-            },
-            (Step::Done, Input::AddFinger) if self.fingers.len() < Finger::ALL.len() => {
-                (Page::Add, vec![])
-            }
-            (Step::Done, Input::TestFinger) if !self.fingers.is_empty() => self.start_test(),
-            (_, _) => (Page::Enroll(e), vec![]),
+            (Step::Releasing, Input::Released(_)) => self.finish_enroll(e),
+            (_, _) => (Activity::Enrolling(e), vec![]),
         }
     }
 
-    fn test(&mut self, mut t: Test, input: Input) -> (Page, Vec<Command>) {
-        let scan = self.scan();
-        let release = |mut t: Test| {
-            t.step = Step::Releasing;
-            (Page::Test(t), vec![Command::Release])
-        };
-        let stop = |mut t: Test| {
-            t.step = Step::Stopping;
-            (Page::Test(t), vec![Command::VerifyStop])
-        };
-        match (t.step, input) {
-            (Step::Claiming, Input::Claimed(Ok(_))) => {
-                if t.cancel {
-                    return release(t);
-                }
-                t.step = Step::Starting;
-                (Page::Test(t), vec![Command::VerifyStart])
+    /// The enrolment is over and the device let go of: the outcome becomes
+    /// the message.
+    fn finish_enroll(&mut self, e: Enroll) -> (Activity, Vec<Command>) {
+        match e.outcome {
+            Some(Outcome::Completed) => {
+                self.enrolled = Some(true);
+                self.message = Some(msg("Registration complete."));
+                (Activity::Idle, vec![Command::List])
             }
-            (Step::Claiming, Input::Claimed(Err(err))) => {
-                if !t.cancel {
-                    t.outcome = Some(TestOutcome::Failed(Failure::service(&err)));
-                }
-                if may_hold_claim(&err) {
-                    return release(t);
-                }
-                t.step = Step::Done;
-                if t.cancel {
-                    return (Page::Fingers, vec![]);
-                }
-                (Page::Test(t), vec![])
+            Some(Outcome::Failed(m)) => {
+                self.message = Some(m);
+                (Activity::Idle, vec![])
             }
-            (Step::Starting, Input::VerifyStarted(Ok(()))) => {
-                if t.cancel {
-                    return stop(t);
-                }
-                t.step = Step::Scanning;
-                t.instruction =
-                    status::verify_first(t.selected.map(|f| self.display_name(f)), scan);
-                (Page::Test(t), vec![])
+            Some(Outcome::Cancelled) | None => {
+                self.message = Some(msg("Registration cancelled."));
+                (Activity::Idle, vec![])
             }
-            (Step::Starting, Input::VerifyStarted(Err(err))) => {
-                if !t.cancel {
-                    t.outcome = Some(TestOutcome::Failed(Failure::service(&err)));
-                }
-                release(t)
-            }
-            (Step::Starting | Step::Scanning, Input::VerifyFingerSelected(name)) => {
-                t.selected = Finger::from_fprintd(&name);
-                if t.step == Step::Scanning {
-                    t.instruction =
-                        status::verify_first(t.selected.map(|f| self.display_name(f)), scan);
-                }
-                (Page::Test(t), vec![])
-            }
-            (Step::Starting | Step::Scanning, Input::VerifyStatus(result, done)) => {
-                let r = VerifyResult::parse(&result);
-                if !(done || r.is_final()) {
-                    if let Some(i) = r.instruction(scan) {
-                        t.instruction = i;
-                    }
-                    return (Page::Test(t), vec![]);
-                }
-                if t.cancel {
-                    // Still starting, and a stop is already decided: it goes
-                    // out with the reply to VerifyStart.
-                    return (Page::Test(t), vec![]);
-                }
-                t.outcome = Some(match r {
-                    VerifyResult::Match => TestOutcome::Match(t.selected),
-                    VerifyResult::NoMatch => TestOutcome::NoMatch,
-                    VerifyResult::Disconnected => {
-                        TestOutcome::Failed(Failure::test(status::disconnected()))
-                    }
-                    _ => TestOutcome::Failed(Failure::test(status::unknown_error())),
-                });
-                if r == VerifyResult::Disconnected {
-                    return release(t);
-                }
-                if t.step == Step::Starting {
-                    t.cancel = true;
-                    return (Page::Test(t), vec![]);
-                }
-                stop(t)
-            }
-            (Step::Claiming | Step::Starting, Input::Cancel) => {
-                t.cancel = true;
-                if t.outcome.is_none() {
-                    t.outcome = Some(TestOutcome::Cancelled);
-                }
-                (Page::Test(t), vec![])
-            }
-            (Step::Scanning, Input::Cancel) => {
-                t.cancel = true;
-                t.outcome = Some(TestOutcome::Cancelled);
-                stop(t)
-            }
-            (Step::Stopping, Input::VerifyStopped(_)) => release(t),
-            (Step::Releasing, Input::Released(_)) => {
-                t.step = Step::Done;
-                match t.outcome {
-                    Some(TestOutcome::Cancelled) | None => (Page::Fingers, vec![]),
-                    _ => (Page::Test(t), vec![]),
-                }
-            }
-            (Step::Done, Input::Cancel) => (Page::Fingers, vec![]),
-            (Step::Done, Input::TryAgain) => self.start_test(),
-            (_, _) => (Page::Test(t), vec![]),
         }
     }
 
-    fn removing(&mut self, mut r: Remove, input: Input) -> (Page, Vec<Command>) {
+    fn removing(&mut self, mut r: Remove, input: Input) -> (Activity, Vec<Command>) {
+        let delete = |mut r: Remove| {
+            r.step = Step::Starting;
+            let cmd = if r.all {
+                Command::DeleteAll
+            } else {
+                Command::DeleteFinger
+            };
+            (Activity::Removing(r), vec![cmd])
+        };
         match (r.step, input) {
-            (Step::Claiming, Input::Claimed(Ok(_))) => {
-                r.step = Step::Starting;
-                let cmd = if r.all {
-                    Command::DeleteAll
-                } else {
-                    Command::DeleteFinger(r.finger)
-                };
-                (Page::Removing(r), vec![cmd])
-            }
+            (Step::Claiming, Input::Claimed(Ok(_))) => delete(r),
             (Step::Claiming, Input::Claimed(Err(err))) => {
                 if may_hold_claim(&err) {
-                    r.result = Some(RemoveResult::Failed(err));
+                    r.result = Some(Removed::Failed(err));
                     r.step = Step::Releasing;
-                    return (Page::Removing(r), vec![Command::Release]);
+                    return (Activity::Removing(r), vec![Command::Release]);
                 }
-                self.dialog = Some(Dialog::Error(Failure::service(&err)));
-                (Page::Fingers, vec![])
+                self.message = Some(err.message());
+                (Activity::Idle, vec![])
             }
-            (Step::Starting, Input::Deleted(res)) => {
-                r.result = Some(match res {
-                    Ok(()) => RemoveResult::Removed,
-                    Err(e) if e.kind == ErrorKind::Unsupported && !r.all => RemoveResult::NeedsAll,
-                    Err(e) => RemoveResult::Failed(e),
-                });
-                r.step = Step::Releasing;
-                (Page::Removing(r), vec![Command::Release])
-            }
-            (Step::Releasing, Input::Released(_)) => match r.result {
-                Some(RemoveResult::Removed) => {
-                    if r.all {
-                        self.fingers.clear();
-                        self.notice = Some(msg("All your fingerprints were removed."));
-                    } else {
-                        self.fingers.retain(|f| *f != r.finger);
-                        self.notice = Some(
-                            msg("Fingerprint removed: {name}")
-                                .with("name", self.display_name(r.finger)),
-                        );
-                    }
-                    // Their names go with them.
-                    self.forget_unenrolled_labels();
-                    (Page::Fingers, vec![Command::List])
+            (Step::Starting, Input::Deleted(res)) => match res {
+                // An older service: only "remove all" exists.
+                Err(e) if e.kind == ErrorKind::Unsupported && !r.all => {
+                    r.all = true;
+                    delete(r)
                 }
-                Some(RemoveResult::NeedsAll) => {
-                    self.dialog = Some(Dialog::ConfirmRemoveAll(r.finger));
-                    (Page::Fingers, vec![])
+                res => {
+                    r.result = Some(match res {
+                        Ok(()) => Removed::Yes,
+                        Err(e) => Removed::Failed(e),
+                    });
+                    r.step = Step::Releasing;
+                    (Activity::Removing(r), vec![Command::Release])
                 }
-                Some(RemoveResult::Failed(e)) => {
-                    self.dialog = Some(Dialog::Error(Failure::service(&e)));
-                    (Page::Fingers, vec![Command::List])
-                }
-                None => (Page::Fingers, vec![Command::List]),
             },
-            (_, _) => (Page::Removing(r), vec![]),
+            (Step::Releasing, Input::Released(_)) => {
+                match r.result {
+                    Some(Removed::Yes) => {
+                        self.enrolled = Some(false);
+                        self.message = Some(msg("Fingerprint removed."));
+                    }
+                    Some(Removed::Failed(e)) => self.message = Some(e.message()),
+                    None => {}
+                }
+                (Activity::Idle, vec![Command::List])
+            }
+            (_, _) => (Activity::Removing(r), vec![]),
         }
     }
+}
+
+fn start_enroll() -> (Activity, Vec<Command>) {
+    (
+        Activity::Enrolling(Enroll {
+            stages: None,
+            passed: 0,
+            step: Step::Claiming,
+            instruction: msg("Getting the reader ready…"),
+            outcome: None,
+            cancel: false,
+        }),
+        vec![Command::Claim],
+    )
 }
 
 /// Whether a failed Claim may still have claimed the device: when it timed
@@ -1068,13 +573,6 @@ impl Model {
 /// then is harmless if it did not, and frees the reader if it did.
 fn may_hold_claim(err: &ServiceError) -> bool {
     err.kind == ErrorKind::Timeout
-}
-
-fn enroll_service_failure(err: &ServiceError) -> EnrollOutcome {
-    EnrollOutcome::Failed {
-        failure: Failure::service(err),
-        duplicate: err.kind == ErrorKind::AlreadyEnrolled,
-    }
 }
 
 #[cfg(test)]

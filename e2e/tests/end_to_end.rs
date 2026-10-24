@@ -1,7 +1,8 @@
 //! The application core against a real fingerprint service on a private bus:
 //! validity-rs's daemon with its emulated sensor, driven through the same
 //! D-Bus driver and state machine as the GTK interface, from start to
-//! enrolment, listing, test and removal, and through the error paths.
+//! enrolment of the right index finger and its removal, and through the error
+//! paths.
 //!
 //! Needs `dbus-daemon` on the PATH. A missing binary fails the test: it is a
 //! requirement, not something to skip.
@@ -14,14 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fingerprint_settings::error::ErrorKind;
-use fingerprint_settings::fingers::Finger;
 use fingerprint_settings::fprint::{Bus, Deadlines, Service};
 use fingerprint_settings::i18n::Catalogue;
-use fingerprint_settings::labels::{Labels, Store};
-use fingerprint_settings::machine::{
-    Command, Dialog, EnrollOutcome, Input, Model, Page, Step, TestOutcome,
-};
-use fingerprint_settings::status::ScanType;
+use fingerprint_settings::machine::{Activity, Command, FINGER, Input, Model, Step};
 use validity_daemon::fake::{FakeSensor, Touch, blobs};
 use validity_daemon::polkit::{Authority, Check, ENROLL, VERIFY};
 use validity_daemon::service::{self, Deps, Options, Setup};
@@ -358,8 +354,6 @@ struct App {
     sent: Vec<Command>,
     /// Every enrolment instruction shown, in English.
     instructions: Vec<String>,
-    /// Where the names are saved, as the window does.
-    store: Option<Store>,
 }
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -375,36 +369,16 @@ impl App {
             service: Service::start_with(Bus::Address(address.to_string()), deadlines).unwrap(),
             sent: Vec::new(),
             instructions: Vec::new(),
-            store: None,
         }
-    }
-
-    /// With the names kept in `store`, loaded first, as the window does.
-    fn with_store(address: &str, mut store: Store) -> Self {
-        let loaded = store.load();
-        let mut app = Self::new(address);
-        app.m = Model::with_labels(loaded.labels);
-        app.store = Some(store);
-        app
     }
 
     fn input(&mut self, i: Input) {
         for c in self.m.update(i) {
-            self.sent.push(c.clone());
+            self.sent.push(c);
             self.service.send(c);
         }
-        if let Some(labels) = self.m.take_labels_to_save()
-            && let Some(store) = &mut self.store
-        {
-            store.save(&labels).unwrap();
-        }
-        let shown = match &self.m.page {
-            Page::Enroll(e) => Some(&e.instruction),
-            Page::Test(t) => Some(&t.instruction),
-            _ => None,
-        };
-        if let Some(i) = shown {
-            let text = i.render(&Catalogue::default());
+        if let Activity::Enrolling(e) = &self.m.activity {
+            let text = e.instruction.render(&Catalogue::default());
             if self.instructions.last() != Some(&text) {
                 self.instructions.push(text);
             }
@@ -420,8 +394,8 @@ impl App {
                 Err(e) if e.is_empty() => {
                     assert!(
                         Instant::now() < end,
-                        "timed out waiting for {what}; page {:?}, sent {:?}",
-                        self.m.page,
+                        "timed out waiting for {what}; activity {:?}, sent {:?}",
+                        self.m.activity,
                         self.sent
                     );
                     std::thread::sleep(Duration::from_millis(5));
@@ -431,7 +405,7 @@ impl App {
         }
     }
 
-    /// Feeds inputs until nothing is in flight and the page is not loading.
+    /// Feeds inputs until nothing is in flight.
     fn settle(&mut self) {
         self.until("the app to settle", |m| !m.busy());
         // And whatever refresh was queued last.
@@ -449,63 +423,27 @@ impl App {
         self.settle();
     }
 
-    fn enroll(&self) -> &fingerprint_settings::machine::Enroll {
-        match &self.m.page {
-            Page::Enroll(e) => e,
-            p => panic!("not enrolling: {p:?}"),
-        }
-    }
-
-    fn test(&self) -> &fingerprint_settings::machine::Test {
-        match &self.m.page {
-            Page::Test(t) => t,
-            p => panic!("not testing: {p:?}"),
-        }
-    }
-
-    /// Adds `finger` with its standard name, the emulated sensor seeing
-    /// `touches`.
-    fn add(&mut self, fake: &FakeSensor, finger: Finger, touches: Vec<Touch>) {
-        self.add_named(fake, Some(finger), None, touches);
-    }
-
-    /// Adds a fingerprint as the add page does: a finger or none, a name or
-    /// none.
-    fn add_named(
-        &mut self,
-        fake: &FakeSensor,
-        finger: Option<Finger>,
-        label: Option<&str>,
-        touches: Vec<Touch>,
-    ) {
-        self.input(Input::AddFinger);
-        assert_eq!(self.m.page, Page::Add);
+    /// "Register my right index finger", the emulated sensor seeing
+    /// `touches`, until it is over.
+    fn enroll(&mut self, fake: &FakeSensor, touches: Vec<Touch>) {
         fake.touch(touches);
-        self.input(Input::StartEnroll {
-            finger,
-            label: label.map(String::from),
-        });
-        self.until(
-            "the enrolment to end",
-            |m| matches!(&m.page, Page::Enroll(e) if e.step == Step::Done),
-        );
+        self.input(Input::Enroll);
         self.settle();
     }
 
-    fn test_finger(&mut self, fake: &FakeSensor, touches: Vec<Touch>) -> TestOutcome {
-        fake.touch(touches);
-        self.input(Input::TestFinger);
-        self.until(
-            "the test to end",
-            |m| matches!(&m.page, Page::Test(t) if t.step == Step::Done),
-        );
+    /// "Remove", until it is over.
+    fn remove(&mut self) {
+        self.input(Input::Remove);
         self.settle();
-        self.test().outcome.clone().unwrap()
     }
 
-    fn back(&mut self) {
-        self.input(Input::Cancel);
-        assert_eq!(self.m.page, Page::Fingers);
+    /// The message shown, in French.
+    fn said(&self) -> String {
+        self.m
+            .message
+            .as_ref()
+            .expect("a message")
+            .render(&Catalogue::builtin("fr").unwrap())
     }
 
     /// Whether the device is free: a second client can claim and release it.
@@ -523,27 +461,61 @@ fn five_good(f: u32) -> Vec<Touch> {
     vec![Touch::Finger(f); 6]
 }
 
+/// The user's enrolled fingers, as another client sees them.
+fn list(c: &Connection) -> Vec<String> {
+    zbus::block_on(async {
+        match c
+            .call_method(
+                Some("net.reactivated.Fprint"),
+                DEVICE.0,
+                Some(DEVICE.1),
+                "ListEnrolledFingers",
+                &("",),
+            )
+            .await
+        {
+            Ok(reply) => reply.body().deserialize().unwrap(),
+            Err(_) => Vec::new(),
+        }
+    })
+}
+
+/// Enrols `finger` with image `image` the way another tool would
+/// (`fprintd-enroll`), straight over D-Bus.
+fn enroll_other(address: &str, fake: &FakeSensor, finger: &str, image: u32) {
+    let c = client(address);
+    fake.touch(five_good(image));
+    call(&c, DEVICE.0, DEVICE.1, "Claim", Some("")).unwrap();
+    call(&c, DEVICE.0, DEVICE.1, "EnrollStart", Some(finger)).unwrap();
+    let end = Instant::now() + TIMEOUT;
+    while !list(&c).iter().any(|f| f == finger) {
+        assert!(Instant::now() < end, "{finger} was not enrolled");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = call(&c, DEVICE.0, DEVICE.1, "EnrollStop", None);
+    call(&c, DEVICE.0, DEVICE.1, "Release", None).unwrap();
+}
+
 // ------------------------------------------------------------ the tests
 
 #[test]
-fn enrol_list_test_remove() {
+fn enrol_and_remove() {
     let env = Env::new();
     let mut app = env.app();
     app.start();
-    assert_eq!(app.m.page, Page::Fingers);
-    assert!(app.m.fingers.is_empty());
-    let dev = app.m.device.clone().unwrap();
-    assert_eq!(dev.scan, ScanType::Press);
+    assert_eq!(app.m.enrolled, Some(false));
     assert_eq!(
-        dev.name,
-        "Synaptics/Validity fingerprint sensor (06cb:009a)"
+        app.m
+            .status()
+            .unwrap()
+            .render(&Catalogue::builtin("fr").unwrap()),
+        "Aucune empreinte enregistrée"
     );
+    assert!(app.m.can_enroll() && !app.m.shows_remove());
 
-    // Enrol the right index finger: a redundant image and a failed capture
-    // on the way.
-    app.add(
+    // A redundant image and a failed capture on the way.
+    app.enroll(
         &env.fake,
-        Finger::RightIndex,
         vec![
             Touch::Finger(1),
             Touch::Finger(1),
@@ -555,20 +527,26 @@ fn enrol_list_test_remove() {
             Touch::Finger(1),
         ],
     );
-    let e = app.enroll();
-    assert_eq!(e.outcome, Some(EnrollOutcome::Completed));
-    assert_eq!(e.stages, Some(6), "num-enroll-stages read after Claim");
-    assert_eq!(e.passed, 6);
-    assert_eq!(e.fraction(), Some(1.0));
+    assert_eq!(app.said(), "Enregistrement terminé.");
+    assert_eq!(app.m.enrolled, Some(true));
+    assert_eq!(
+        app.m
+            .status()
+            .unwrap()
+            .render(&Catalogue::builtin("fr").unwrap()),
+        "Index droit enregistré"
+    );
     assert_eq!(
         app.instructions,
         [
             "Getting the reader ready…",
-            "Place your right index finger flat on the reader.",
-            "Good. Lift your finger, then place it on the reader again.",
-            "Lift your finger completely off the reader, then place it again.",
-            "That did not work. Lift your finger, then place it on the reader again.",
-            "Good. Lift your finger, then place it on the reader again.",
+            "Place your finger…",
+            "Again… 1/6",
+            "Again… 2/6",
+            "Poorly read, place your finger again.",
+            "Again… 3/6",
+            "Again… 4/6",
+            "Again… 5/6",
         ]
     );
     assert_eq!(
@@ -577,182 +555,93 @@ fn enrol_list_test_remove() {
             Command::Connect,
             Command::List,
             Command::Claim,
-            Command::EnrollStart(Finger::RightIndex),
+            Command::EnrollStart,
             Command::EnrollStop,
             Command::Release,
             Command::List,
         ]
     );
-    assert_eq!(app.m.fingers, [Finger::RightIndex]);
     assert!(App::device_is_free(&env.bus.address), "released");
-    app.back();
+    // Stored as the right index finger.
+    assert_eq!(list(&client(&env.bus.address)), [FINGER]);
 
-    // A second finger.
-    app.add(&env.fake, Finger::LeftThumb, five_good(2));
-    assert_eq!(app.enroll().outcome, Some(EnrollOutcome::Completed));
-    app.back();
-    assert_eq!(app.m.fingers, [Finger::LeftThumb, Finger::RightIndex]);
-
-    // A fresh start lists both, from the service.
+    // A fresh start sees it, from the service.
     let mut fresh = env.app();
     fresh.start();
-    assert_eq!(fresh.m.fingers, [Finger::LeftThumb, Finger::RightIndex]);
+    assert_eq!(fresh.m.enrolled, Some(true));
+    assert!(fresh.m.can_remove() && !fresh.m.can_enroll());
     drop(fresh);
 
-    // Test: two prints, so any of them ("any"): recognised, not named.
-    assert_eq!(
-        app.test_finger(&env.fake, vec![Touch::Finger(2)]),
-        TestOutcome::Match(None)
-    );
-    // Again, with an unknown finger after a failed capture.
-    app.instructions.clear();
-    env.fake.touch([Touch::ScanError, Touch::Finger(7)]);
-    app.input(Input::TryAgain);
-    app.until(
-        "the second test",
-        |m| matches!(&m.page, Page::Test(t) if t.step == Step::Done),
-    );
-    app.settle();
-    assert_eq!(app.test().outcome, Some(TestOutcome::NoMatch));
-    assert!(
-        app.instructions.contains(
-            &"That did not work. Lift your finger, then place it on the reader again.".into()
-        ),
-        "{:?}",
-        app.instructions
-    );
-    assert!(App::device_is_free(&env.bus.address));
-    app.back();
-
-    // Remove the right index finger, after a change of mind.
-    app.input(Input::RemoveFinger(Finger::RightIndex));
-    assert_eq!(
-        app.m.dialog,
-        Some(Dialog::ConfirmRemove(Finger::RightIndex))
-    );
-    app.input(Input::Dismiss);
-    assert_eq!(app.m.fingers.len(), 2);
-    app.input(Input::RemoveFinger(Finger::RightIndex));
-    app.input(Input::Confirm);
-    app.settle();
-    assert_eq!(app.m.page, Page::Fingers);
-    assert!(app.m.dialog.is_none());
-    assert_eq!(app.m.fingers, [Finger::LeftThumb]);
-    assert_eq!(
-        app.m
-            .take_notice()
-            .unwrap()
-            .render(&Catalogue::builtin("fr").unwrap()),
-        "Empreinte supprimée\u{a0}: Index droit"
-    );
-    assert!(
-        app.sent
-            .contains(&Command::DeleteFinger(Finger::RightIndex))
-    );
+    app.remove();
+    assert_eq!(app.said(), "Empreinte supprimée.");
+    assert_eq!(app.m.enrolled, Some(false));
+    assert!(app.sent.ends_with(&[
+        Command::Claim,
+        Command::DeleteFinger,
+        Command::Release,
+        Command::List
+    ]));
     assert!(!app.sent.contains(&Command::DeleteAll));
     assert!(App::device_is_free(&env.bus.address));
+    assert!(list(&client(&env.bus.address)).is_empty());
 
-    // One print left: the service names the finger it checks.
-    let outcome = app.test_finger(&env.fake, vec![Touch::Finger(2)]);
-    assert_eq!(outcome, TestOutcome::Match(Some(Finger::LeftThumb)));
-    let (title, _) = outcome.texts(&app.m.labels).unwrap();
-    assert_eq!(
-        title.render(&Catalogue::default()),
-        "Recognised: Left thumb"
-    );
-    app.back();
-
-    // The removed print is gone from the sensor: enrolling the same finger
-    // image again as another finger works (no duplicate).
-    app.add(&env.fake, Finger::RightMiddle, five_good(1));
-    assert_eq!(app.enroll().outcome, Some(EnrollOutcome::Completed));
-    app.back();
-    assert_eq!(app.m.fingers, [Finger::LeftThumb, Finger::RightMiddle]);
+    // The removed print is gone from the sensor: the same finger enrols
+    // again (no duplicate).
+    app.enroll(&env.fake, five_good(1));
+    assert_eq!(app.said(), "Enregistrement terminé.");
+    assert_eq!(app.m.enrolled, Some(true));
 }
 
 #[test]
-fn duplicate_and_cancel() {
+fn duplicate_other_fingers_and_cancel() {
     let env = Env::new();
+    // Another finger, enrolled with another tool: not the right index.
+    enroll_other(&env.bus.address, &env.fake, "left-thumb", 3);
     let mut app = env.app();
     app.start();
-    app.add(&env.fake, Finger::LeftIndex, five_good(3));
-    assert_eq!(app.enroll().outcome, Some(EnrollOutcome::Completed));
-    app.back();
+    assert_eq!(app.m.enrolled, Some(false));
 
-    // The same physical finger as another finger: a duplicate, found on the
-    // first touch.
-    app.add(&env.fake, Finger::RightIndex, vec![Touch::Finger(3)]);
-    match &app.enroll().outcome {
-        Some(EnrollOutcome::Failed { failure, duplicate }) => {
-            assert!(duplicate);
-            assert!(
-                failure
-                    .description
-                    .render(&Catalogue::default())
-                    .starts_with("This fingerprint is already registered")
-            );
-        }
-        o => panic!("{o:?}"),
-    }
+    // The same physical finger as the right index: a duplicate, found on
+    // the first touch.
+    app.enroll(&env.fake, vec![Touch::Finger(3)]);
+    assert_eq!(
+        app.said(),
+        "Ce doigt est déjà enregistré (peut-être sur un autre compte)."
+    );
+    assert_eq!(app.m.enrolled, Some(false));
     assert!(
         App::device_is_free(&env.bus.address),
         "released after a failure"
     );
-    // "Try again" with the same finger is not offered for a duplicate.
-    app.input(Input::TryAgain);
-    assert!(matches!(app.m.page, Page::Enroll(_)));
-    app.back();
-    assert_eq!(app.m.fingers, [Finger::LeftIndex]);
     assert_eq!(env.fake.pending_touches(), 0);
 
     // Cancel while the sensor waits for the finger.
-    app.input(Input::AddFinger);
-    app.input(Input::StartEnroll {
-        finger: Some(Finger::RightThumb),
-        label: None,
-    });
+    app.input(Input::Enroll);
     app.until(
         "scanning",
-        |m| matches!(&m.page, Page::Enroll(e) if e.step == Step::Scanning),
+        |m| matches!(&m.activity, Activity::Enrolling(e) if e.step == Step::Scanning),
     );
-    assert_eq!(
-        app.enroll().instruction.render(&Catalogue::default()),
-        "Place your right thumb flat on the reader."
-    );
+    assert_eq!(app.instructions.last().unwrap(), "Place your finger…");
     app.input(Input::Cancel);
     app.settle();
-    assert_eq!(app.m.page, Page::Fingers);
+    assert_eq!(app.said(), "Enregistrement annulé.");
     assert!(
         App::device_is_free(&env.bus.address),
         "released after a cancel"
     );
-    assert_eq!(app.m.fingers, [Finger::LeftIndex]);
+    assert!(app.sent.ends_with(&[
+        Command::Claim,
+        Command::EnrollStart,
+        Command::EnrollStop,
+        Command::Release
+    ]));
 
-    // Cancel a test while it waits.
-    app.input(Input::TestFinger);
-    // The service says which finger it checks just after its reply.
-    app.until(
-        "the selected finger",
-        |m| matches!(&m.page, Page::Test(t) if t.step == Step::Scanning && t.selected.is_some()),
-    );
-    assert_eq!(
-        app.test().instruction.render(&Catalogue::default()),
-        "Place the finger \u{201c}Left index finger\u{201d} on the reader."
-    );
-    app.input(Input::Cancel);
-    app.settle();
-    assert_eq!(app.m.page, Page::Fingers);
-    assert!(App::device_is_free(&env.bus.address));
-    let n = app.sent.len();
-    assert_eq!(
-        app.sent[n - 4..],
-        [
-            Command::Claim,
-            Command::VerifyStart,
-            Command::VerifyStop,
-            Command::Release
-        ]
-    );
+    // And it still works afterwards.
+    app.enroll(&env.fake, five_good(4));
+    assert_eq!(app.m.enrolled, Some(true));
+    let mut fingers = list(&client(&env.bus.address));
+    fingers.sort();
+    assert_eq!(fingers, ["left-thumb", FINGER]);
 }
 
 #[test]
@@ -764,85 +653,45 @@ fn busy_and_permission_denied() {
     // Another program holds the reader.
     let other = client(&env.bus.address);
     call(&other, DEVICE.0, DEVICE.1, "Claim", Some("")).unwrap();
-    app.input(Input::AddFinger);
-    app.input(Input::StartEnroll {
-        finger: Some(Finger::LeftThumb),
-        label: None,
-    });
-    app.settle();
-    match &app.enroll().outcome {
-        Some(EnrollOutcome::Failed { failure, .. }) => {
-            assert_eq!(failure.title, ErrorKind::Busy.title());
-            assert!(
-                failure
-                    .detail
-                    .as_deref()
-                    .unwrap()
-                    .starts_with("net.reactivated.Fprint.Error.AlreadyInUse")
-            );
-        }
-        o => panic!("{o:?}"),
-    }
+    app.enroll(&env.fake, vec![]);
+    assert_eq!(app.m.message, Some(ErrorKind::Busy.message()));
+    assert!(app.m.can_enroll());
     // Released by the other program: trying again works.
     call(&other, DEVICE.0, DEVICE.1, "Release", None).unwrap();
-    env.fake.touch(five_good(4));
-    app.input(Input::TryAgain);
-    app.until(
-        "the enrolment",
-        |m| matches!(&m.page, Page::Enroll(e) if e.step == Step::Done),
-    );
-    app.settle();
-    assert_eq!(app.enroll().outcome, Some(EnrollOutcome::Completed));
-    app.back();
+    app.enroll(&env.fake, five_good(4));
+    assert_eq!(app.m.enrolled, Some(true));
+
+    // polkit refuses removal: nothing removed, the device released.
+    env.authority.deny(ENROLL);
+    app.remove();
+    assert_eq!(app.said(), "Autorisation refusée.");
+    assert_eq!(app.m.enrolled, Some(true));
+    assert!(App::device_is_free(&env.bus.address));
 
     // polkit refuses enrolment: the claim works (verify is allowed), the
     // start does not, and the device is released.
+    env.authority.allow_all();
+    app.remove();
+    assert_eq!(app.m.enrolled, Some(false));
     env.authority.deny(ENROLL);
-    app.input(Input::AddFinger);
-    app.input(Input::StartEnroll {
-        finger: Some(Finger::RightThumb),
-        label: None,
-    });
-    app.settle();
-    match &app.enroll().outcome {
-        Some(EnrollOutcome::Failed { failure, .. }) => {
-            assert_eq!(failure.title, ErrorKind::PermissionDenied.title());
-        }
-        o => panic!("{o:?}"),
-    }
-    assert!(app.sent.ends_with(&[
-        Command::Claim,
-        Command::EnrollStart(Finger::RightThumb),
-        Command::Release
-    ]));
-    assert!(App::device_is_free(&env.bus.address));
-    app.back();
-
-    // Removal refused too: an error dialog, nothing removed.
-    app.input(Input::RemoveFinger(Finger::LeftThumb));
-    app.input(Input::Confirm);
-    app.settle();
-    match &app.m.dialog {
-        Some(Dialog::Error(f)) => assert_eq!(f.title, ErrorKind::PermissionDenied.title()),
-        d => panic!("{d:?}"),
-    }
-    app.input(Input::Confirm);
-    assert_eq!(app.m.fingers, [Finger::LeftThumb]);
+    app.enroll(&env.fake, vec![]);
+    assert_eq!(app.said(), "Autorisation refusée.");
+    assert!(
+        app.sent
+            .ends_with(&[Command::Claim, Command::EnrollStart, Command::Release])
+    );
     assert!(App::device_is_free(&env.bus.address));
 
-    // Not even allowed to list: a problem page at start.
+    // Not even allowed to list: said at start, and the app stays usable.
     env.authority.deny(VERIFY);
     let mut denied = env.app();
     denied.start();
-    match &denied.m.page {
-        Page::Problem(f) => assert_eq!(f.title, ErrorKind::PermissionDenied.title()),
-        p => panic!("{p:?}"),
-    }
+    assert_eq!(denied.said(), "Autorisation refusée.");
+    assert_eq!(denied.m.enrolled, None);
     env.authority.allow_all();
-    denied.input(Input::TryAgain);
-    denied.settle();
-    assert_eq!(denied.m.page, Page::Fingers);
-    assert_eq!(denied.m.fingers, [Finger::LeftThumb]);
+    denied.start();
+    assert_eq!(denied.m.enrolled, Some(false));
+    assert_eq!(denied.m.message, None);
 }
 
 #[test]
@@ -851,27 +700,12 @@ fn service_unavailable_no_reader_and_service_lost() {
     let bus = PrivateBus::start();
     let mut app = App::new(&bus.address);
     app.start();
-    match &app.m.page {
-        Page::Problem(f) => {
-            assert_eq!(f.title, ErrorKind::Unavailable.title());
-            assert!(
-                f.detail
-                    .as_deref()
-                    .unwrap()
-                    .contains("org.freedesktop.DBus.Error.ServiceUnknown"),
-                "{:?}",
-                f.detail
-            );
-        }
-        p => panic!("{p:?}"),
-    }
+    assert_eq!(app.said(), "Le service d'empreintes n'est pas disponible.");
+    assert!(app.m.can_enroll());
     // No bus at all.
     let mut nobus = App::new("unix:path=/nonexistent/fingerprint-settings-test");
     nobus.start();
-    match &nobus.m.page {
-        Page::Problem(f) => assert_eq!(f.title, ErrorKind::Unavailable.title(), "{:?}", f.detail),
-        p => panic!("{p:?}"),
-    }
+    assert_eq!(nobus.m.message, Some(ErrorKind::Unavailable.message()));
 
     // The daemon, with its sensor unplugged: no reader.
     let mut env = Env::new();
@@ -884,39 +718,26 @@ fn service_unavailable_no_reader_and_service_lost() {
     }
     let mut app = env.app();
     app.start();
-    match &app.m.page {
-        Page::Problem(f) => assert_eq!(f.title, ErrorKind::NoReader.title()),
-        p => panic!("{p:?}"),
-    }
-    // Plugged back: "try again" finds it.
+    assert_eq!(app.said(), "Aucun lecteur d'empreintes détecté.");
+    // Plugged back: the button finds it and enrols.
     env.fake.plug();
     wait_ready(&env.bus.address);
-    app.input(Input::TryAgain);
-    app.settle();
-    assert_eq!(app.m.page, Page::Fingers);
+    app.enroll(&env.fake, five_good(1));
+    assert_eq!(app.said(), "Enregistrement terminé.");
+    assert_eq!(app.m.enrolled, Some(true));
+    app.remove();
+    assert_eq!(app.m.enrolled, Some(false));
 
     // The service goes away in the middle of an enrolment.
-    app.input(Input::AddFinger);
-    app.input(Input::StartEnroll {
-        finger: Some(Finger::LeftThumb),
-        label: None,
-    });
+    app.input(Input::Enroll);
     app.until(
         "scanning",
-        |m| matches!(&m.page, Page::Enroll(e) if e.step == Step::Scanning),
+        |m| matches!(&m.activity, Activity::Enrolling(e) if e.step == Step::Scanning),
     );
     env.daemon.take().unwrap().stop().unwrap();
-    app.until(
-        "the loss to be noticed",
-        |m| matches!(&m.page, Page::Enroll(e) if e.step == Step::Done),
-    );
-    match &app.enroll().outcome {
-        Some(EnrollOutcome::Failed { failure, .. }) => {
-            assert_eq!(failure.title, ErrorKind::Unavailable.title());
-        }
-        o => panic!("{o:?}"),
-    }
-    assert!(!app.m.busy());
+    app.until("the loss to be noticed", |m| !m.busy());
+    assert_eq!(app.said(), "Le service d'empreintes n'est pas disponible.");
+    assert!(app.m.can_enroll());
 }
 
 // ------------------------------------------- an older fprintd, for the fallback
@@ -938,8 +759,8 @@ impl OldManager {
     }
 }
 
-/// fprintd before DeleteEnrolledFinger: a swipe reader with an unknown number
-/// of stages, whose prints can only be deleted all at once.
+/// fprintd before DeleteEnrolledFinger: prints can only be deleted all at
+/// once.
 struct OldDevice {
     fingers: Arc<Mutex<Vec<String>>>,
 }
@@ -958,14 +779,6 @@ impl OldDevice {
     fn delete_enrolled_fingers2(&self) {
         self.fingers.lock().unwrap().clear();
     }
-    #[zbus(property, name = "name")]
-    fn name(&self) -> String {
-        "Old reader".into()
-    }
-    #[zbus(property, name = "scan-type")]
-    fn scan_type(&self) -> String {
-        "swipe".into()
-    }
     #[zbus(property, name = "num-enroll-stages")]
     fn num_enroll_stages(&self) -> i32 {
         -1
@@ -973,12 +786,9 @@ impl OldDevice {
 }
 
 #[test]
-fn older_service_removes_all_after_asking() {
+fn older_service_removes_all() {
     let bus = PrivateBus::start();
-    let fingers = Arc::new(Mutex::new(vec![
-        "left-thumb".to_string(),
-        "right-index-finger".to_string(),
-    ]));
+    let fingers = Arc::new(Mutex::new(vec![FINGER.to_string()]));
     let _service = zbus::block_on(async {
         zbus::connection::Builder::address(bus.address.as_str())
             .serve_at(MANAGER.0, OldManager)
@@ -995,42 +805,19 @@ fn older_service_removes_all_after_asking() {
     });
     let mut app = App::new(&bus.address);
     app.start();
-    assert_eq!(app.m.page, Page::Fingers);
-    assert_eq!(app.m.fingers, [Finger::LeftThumb, Finger::RightIndex]);
-    let dev = app.m.device.clone().unwrap();
-    assert_eq!(
-        (dev.name.as_str(), dev.scan),
-        ("Old reader", ScanType::Swipe)
-    );
+    assert_eq!(app.m.enrolled, Some(true));
 
-    app.input(Input::RemoveFinger(Finger::LeftThumb));
-    app.input(Input::Confirm);
-    app.settle();
-    // Asked before anything is lost.
-    assert_eq!(
-        app.m.dialog,
-        Some(Dialog::ConfirmRemoveAll(Finger::LeftThumb))
-    );
-    assert_eq!(fingers.lock().unwrap().len(), 2);
-    assert!(app.sent.contains(&Command::DeleteFinger(Finger::LeftThumb)));
-    app.input(Input::Confirm);
-    app.settle();
-    assert!(app.m.dialog.is_none());
-    assert!(app.m.fingers.is_empty());
+    app.remove();
+    assert_eq!(app.said(), "Empreinte supprimée.");
+    assert_eq!(app.m.enrolled, Some(false));
     assert!(fingers.lock().unwrap().is_empty());
-    assert_eq!(
-        app.m.take_notice().unwrap().render(&Catalogue::default()),
-        "All your fingerprints were removed."
-    );
     assert_eq!(
         app.sent,
         [
             Command::Connect,
             Command::List,
             Command::Claim,
-            Command::DeleteFinger(Finger::LeftThumb),
-            Command::Release,
-            Command::Claim,
+            Command::DeleteFinger,
             Command::DeleteAll,
             Command::Release,
             Command::List,
@@ -1071,25 +858,19 @@ fn a_call_without_answer_times_out() {
     };
     let mut app = App::with(&bus.address, deadlines);
     app.start();
-    assert_eq!(app.m.fingers, [Finger::LeftThumb]);
+    assert_eq!(app.m.enrolled, Some(false));
     let t0 = Instant::now();
-    app.input(Input::TestFinger);
-    app.until(
-        "the claim to time out",
-        |m| matches!(&m.page, Page::Test(t) if t.step == Step::Done),
-    );
+    app.input(Input::Enroll);
+    app.settle();
     let waited = t0.elapsed();
     assert!(
         waited >= Duration::from_millis(500) && waited < Duration::from_secs(5),
         "{waited:?}"
     );
-    match &app.test().outcome {
-        Some(TestOutcome::Failed(f)) => {
-            assert_eq!(f.title, ErrorKind::Timeout.title());
-            assert_eq!(f.detail.as_deref(), Some("no answer within 0 s"));
-        }
-        o => panic!("{o:?}"),
-    }
+    assert_eq!(
+        app.said(),
+        "Le service d'empreintes ne répond pas. Réessayez."
+    );
     // The claim may have happened after all: released anyway.
     assert!(
         app.sent.ends_with(&[Command::Claim, Command::Release]),
@@ -1097,146 +878,7 @@ fn a_call_without_answer_times_out() {
         app.sent
     );
     // The driver is still usable afterwards.
-    app.back();
-    app.input(Input::Start);
-    app.settle();
-    assert_eq!(app.m.page, Page::Fingers);
-}
-
-// ------------------------------------------------- named fingerprints
-
-/// A temporary configuration directory.
-struct ConfigDir(TempDir);
-
-impl ConfigDir {
-    fn new() -> Self {
-        ConfigDir(TempDir::new("config"))
-    }
-    fn store(&self) -> Store {
-        Store::new(self.0.0.join("fingerprint-settings").join("names.toml"))
-    }
-}
-
-#[test]
-fn named_fingerprints_follow_their_slot() {
-    let env = Env::new();
-    let config = ConfigDir::new();
-    // A name left over for a fingerprint that no longer exists.
-    let mut store = config.store();
-    store
-        .save(&Labels::from([(Finger::LeftRing, "Old".to_string())]))
-        .unwrap();
-    let mut app = App::with_store(&env.bus.address, config.store());
-    assert_eq!(app.m.labels.len(), 1);
     app.start();
-    // Nothing enrolled: the stale name is dropped, from the file too.
-    assert!(app.m.labels.is_empty());
-    assert!(config.store().load().labels.is_empty());
-
-    // "Just a name, any finger": the first free slot, the right index.
-    let bed = "Pouce, quand je suis au lit";
-    app.add_named(&env.fake, None, Some(bed), vec![Touch::Finger(1); 6]);
-    assert_eq!(app.enroll().outcome, Some(EnrollOutcome::Completed));
-    assert_eq!(app.enroll().slot, Finger::RightIndex);
-    assert!(app.sent.contains(&Command::EnrollStart(Finger::RightIndex)));
-    // No finger named in the instructions: the user did not say which.
-    assert!(
-        app.instructions
-            .contains(&"Place your finger flat on the reader.".to_string()),
-        "{:?}",
-        app.instructions
-    );
-    assert_eq!(
-        app.enroll()
-            .title()
-            .render(&Catalogue::builtin("fr").unwrap()),
-        "Ajout de «\u{a0}Pouce, quand je suis au lit\u{a0}»"
-    );
-    app.back();
-    assert_eq!(app.m.fingers, [Finger::RightIndex]);
-    assert_eq!(
-        config.store().load().labels,
-        Labels::from([(Finger::RightIndex, bed.to_string())])
-    );
-
-    // One print: the test names it.
-    app.instructions.clear();
-    let outcome = app.test_finger(&env.fake, vec![Touch::Finger(1)]);
-    assert_eq!(outcome, TestOutcome::Match(Some(Finger::RightIndex)));
-    let (title, _) = outcome.texts(&app.m.labels).unwrap();
-    assert_eq!(
-        title.render(&Catalogue::builtin("fr").unwrap()),
-        "Reconnu\u{a0}: Pouce, quand je suis au lit"
-    );
-    assert!(
-        app.instructions.contains(
-            &"Place the finger \u{201c}Pouce, quand je suis au lit\u{201d} on the reader."
-                .to_string()
-        ),
-        "{:?}",
-        app.instructions
-    );
-    app.back();
-
-    // A chosen finger with its standard name: no name stored.
-    app.add(&env.fake, Finger::LeftIndex, vec![Touch::Finger(2); 6]);
-    assert_eq!(app.enroll().outcome, Some(EnrollOutcome::Completed));
-    app.back();
-    // Another nameless choice: indexes are taken, so the right thumb.
-    app.add_named(&env.fake, None, Some("Travail"), vec![Touch::Finger(3); 6]);
-    assert_eq!(app.enroll().slot, Finger::RightThumb);
-    app.back();
-    assert_eq!(
-        app.m.fingers,
-        [Finger::LeftIndex, Finger::RightThumb, Finger::RightIndex]
-    );
-    assert_eq!(
-        config.store().load().labels,
-        Labels::from([
-            (Finger::RightIndex, bed.to_string()),
-            (Finger::RightThumb, "Travail".to_string()),
-        ])
-    );
-
-    // Rename, then back to the standard name.
-    app.input(Input::RenameFinger(Finger::LeftIndex));
-    assert_eq!(app.m.dialog, Some(Dialog::Rename(Finger::LeftIndex)));
-    app.input(Input::SetLabel(
-        Finger::LeftIndex,
-        Some("  Index de travail ".into()),
-    ));
-    assert!(app.m.dialog.is_none());
-    assert_eq!(app.m.labels[&Finger::LeftIndex], "Index de travail");
-    assert_eq!(
-        config.store().load().labels[&Finger::LeftIndex],
-        "Index de travail"
-    );
-    app.input(Input::RenameFinger(Finger::LeftIndex));
-    app.input(Input::SetLabel(Finger::LeftIndex, None));
-    assert!(
-        !config
-            .store()
-            .load()
-            .labels
-            .contains_key(&Finger::LeftIndex)
-    );
-
-    // Removing a fingerprint removes its name.
-    app.input(Input::RemoveFinger(Finger::RightIndex));
-    app.input(Input::Confirm);
-    app.settle();
-    assert_eq!(
-        app.m.take_notice().unwrap().render(&Catalogue::default()),
-        "Fingerprint removed: Pouce, quand je suis au lit"
-    );
-    assert!(!app.m.labels.contains_key(&Finger::RightIndex));
-    assert_eq!(
-        config.store().load().labels,
-        Labels::from([(Finger::RightThumb, "Travail".to_string())])
-    );
-    // The slot is free again for the next nameless fingerprint.
-    app.add_named(&env.fake, None, Some("Encore"), vec![Touch::Finger(4); 6]);
-    assert_eq!(app.enroll().slot, Finger::RightIndex);
-    app.back();
-    assert_eq!(config.store().load().labels, app.m.labels);
+    assert_eq!(app.m.enrolled, Some(false));
+    assert_eq!(app.m.message, None);
 }

@@ -40,8 +40,8 @@ Requires:       hicolor-icon-theme
 Requires:       (fprintd or validity-daemon)
 
 %description
-A small desktop application to manage your own fingerprints: add one, name
-it, test it, rename it, remove it. Made for desktops without fingerprint
+A small desktop application to register your right index finger, or remove
+it, in one plain screen. Made for desktops without fingerprint
 settings of their own, such as Xfce, MATE and LXQt. It works with any
 fingerprint service that speaks the fprintd D-Bus interface, fprintd itself
 included. Your password always keeps working.

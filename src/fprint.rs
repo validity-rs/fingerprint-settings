@@ -20,9 +20,7 @@ use zbus::OwnedObjectPath;
 use zruntime::mpmc::{Receiver, Sender, unbounded};
 
 use crate::error::{ErrorKind, ServiceError};
-use crate::fingers::parse_enrolled;
-use crate::machine::{Command, DeviceInfo, Input};
-use crate::status::ScanType;
+use crate::machine::{Command, FINGER, Input};
 
 /// The service's well-known bus name.
 pub const BUS_NAME: &str = "net.reactivated.Fprint";
@@ -66,20 +64,12 @@ trait Device {
     #[zbus(allow_interactive_auth)]
     fn release(&self) -> zbus::Result<()>;
     #[zbus(allow_interactive_auth)]
-    fn verify_start(&self, finger_name: &str) -> zbus::Result<()>;
-    #[zbus(allow_interactive_auth)]
-    fn verify_stop(&self) -> zbus::Result<()>;
-    #[zbus(allow_interactive_auth)]
     fn enroll_start(&self, finger_name: &str) -> zbus::Result<()>;
     #[zbus(allow_interactive_auth)]
     fn enroll_stop(&self) -> zbus::Result<()>;
 
-    #[zbus(property, name = "name")]
-    fn name(&self) -> zbus::Result<String>;
     #[zbus(property, name = "num-enroll-stages")]
     fn num_enroll_stages(&self) -> zbus::Result<i32>;
-    #[zbus(property, name = "scan-type")]
-    fn scan_type(&self) -> zbus::Result<String>;
 }
 
 /// Which bus the service is on.
@@ -129,22 +119,11 @@ fn signal_input(m: &zbus::Message) -> Option<Input> {
     if h.interface().map(|i| i.as_str()) != Some(DEVICE_INTERFACE) {
         return None;
     }
-    let body = m.body();
-    match h.member()?.as_str() {
-        "EnrollStatus" => {
-            let (result, done): (String, bool) = body.deserialize().ok()?;
-            Some(Input::EnrollStatus(result, done))
-        }
-        "VerifyStatus" => {
-            let (result, done): (String, bool) = body.deserialize().ok()?;
-            Some(Input::VerifyStatus(result, done))
-        }
-        "VerifyFingerSelected" => {
-            let (finger,): (String,) = body.deserialize().ok()?;
-            Some(Input::VerifyFingerSelected(finger))
-        }
-        _ => None,
+    if h.member()?.as_str() != "EnrollStatus" {
+        return None;
     }
+    let (result, done): (String, bool) = m.body().deserialize().ok()?;
+    Some(Input::EnrollStatus(result, done))
 }
 
 /// Runs commands against the service.
@@ -183,7 +162,7 @@ impl Driver {
         Ok(conn)
     }
 
-    async fn connect(&mut self) -> Result<DeviceInfo, ServiceError> {
+    async fn connect(&mut self) -> Result<(), ServiceError> {
         let conn = self.connection().await?;
         let manager = res(ManagerProxy::new(&conn).await)?;
         let path = res(manager.get_default_device().await)?;
@@ -214,16 +193,8 @@ impl Driver {
                 owner,
             });
         }
-        // The name and scan type are informative: a service that fails to
-        // give them is still usable.
-        let name = device.name().await.unwrap_or_default();
-        let scan = device
-            .scan_type()
-            .await
-            .map(|s| ScanType::parse(&s))
-            .unwrap_or_default();
         self.device = Some(device);
-        Ok(DeviceInfo { name, scan })
+        Ok(())
     }
 
     fn device(&self) -> Result<&DeviceProxy<'static>, ServiceError> {
@@ -245,7 +216,7 @@ impl Driver {
             Command::Connect => Input::Connected(self.connect().await),
             Command::List => Input::Listed(match self.device() {
                 Ok(d) => match d.list_enrolled_fingers("").await {
-                    Ok(names) => Ok(parse_enrolled(&names)),
+                    Ok(names) => Ok(names),
                     Err(e) => {
                         let e = ServiceError::from_zbus(&e);
                         if e.kind == ErrorKind::NoPrints {
@@ -271,18 +242,13 @@ impl Driver {
                 Err(e) => Err(e),
             }),
             Command::Release => Input::Released(self.call(|d| d.release()).await),
-            Command::EnrollStart(f) => {
-                Input::EnrollStarted(self.call(|d| d.enroll_start(f.fprintd_name())).await)
+            Command::EnrollStart => {
+                Input::EnrollStarted(self.call(|d| d.enroll_start(FINGER)).await)
             }
             Command::EnrollStop => Input::EnrollStopped(self.call(|d| d.enroll_stop()).await),
-            Command::VerifyStart => {
-                Input::VerifyStarted(self.call(|d| d.verify_start("any")).await)
+            Command::DeleteFinger => {
+                Input::Deleted(self.call(|d| d.delete_enrolled_finger(FINGER)).await)
             }
-            Command::VerifyStop => Input::VerifyStopped(self.call(|d| d.verify_stop()).await),
-            Command::DeleteFinger(f) => Input::Deleted(
-                self.call(|d| d.delete_enrolled_finger(f.fprintd_name()))
-                    .await,
-            ),
             Command::DeleteAll => Input::Deleted(self.call(|d| d.delete_enrolled_fingers2()).await),
         }
     }
@@ -318,9 +284,7 @@ impl Deadlines {
     /// How long `cmd` may take.
     pub fn of(&self, cmd: &Command) -> Duration {
         match cmd {
-            Command::EnrollStart(_) | Command::DeleteFinger(_) | Command::DeleteAll => {
-                self.interactive
-            }
+            Command::EnrollStart | Command::DeleteFinger | Command::DeleteAll => self.interactive,
             _ => self.call,
         }
     }
@@ -337,11 +301,9 @@ pub fn timed_out(cmd: &Command, limit: Duration) -> Input {
         Command::List => Input::Listed(Err(e)),
         Command::Claim => Input::Claimed(Err(e)),
         Command::Release => Input::Released(Err(e)),
-        Command::EnrollStart(_) => Input::EnrollStarted(Err(e)),
+        Command::EnrollStart => Input::EnrollStarted(Err(e)),
         Command::EnrollStop => Input::EnrollStopped(Err(e)),
-        Command::VerifyStart => Input::VerifyStarted(Err(e)),
-        Command::VerifyStop => Input::VerifyStopped(Err(e)),
-        Command::DeleteFinger(_) | Command::DeleteAll => Input::Deleted(Err(e)),
+        Command::DeleteFinger | Command::DeleteAll => Input::Deleted(Err(e)),
     }
 }
 
@@ -457,19 +419,16 @@ impl Drop for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fingers::Finger;
     use crate::machine::Model;
 
-    const ALL: [Command; 10] = [
+    const ALL: [Command; 8] = [
         Command::Connect,
         Command::List,
         Command::Claim,
         Command::Release,
-        Command::EnrollStart(Finger::LeftThumb),
+        Command::EnrollStart,
         Command::EnrollStop,
-        Command::VerifyStart,
-        Command::VerifyStop,
-        Command::DeleteFinger(Finger::LeftThumb),
+        Command::DeleteFinger,
         Command::DeleteAll,
     ];
 
@@ -486,7 +445,7 @@ mod tests {
             // the others a minute.
             let interactive = matches!(
                 c,
-                Command::EnrollStart(_) | Command::DeleteFinger(_) | Command::DeleteAll
+                Command::EnrollStart | Command::DeleteFinger | Command::DeleteAll
             );
             assert_eq!(
                 d,
@@ -513,11 +472,9 @@ mod tests {
                 | (Command::List, Input::Listed(Err(e)))
                 | (Command::Claim, Input::Claimed(Err(e)))
                 | (Command::Release, Input::Released(Err(e)))
-                | (Command::EnrollStart(_), Input::EnrollStarted(Err(e)))
+                | (Command::EnrollStart, Input::EnrollStarted(Err(e)))
                 | (Command::EnrollStop, Input::EnrollStopped(Err(e)))
-                | (Command::VerifyStart, Input::VerifyStarted(Err(e)))
-                | (Command::VerifyStop, Input::VerifyStopped(Err(e)))
-                | (Command::DeleteFinger(_) | Command::DeleteAll, Input::Deleted(Err(e))) => e,
+                | (Command::DeleteFinger | Command::DeleteAll, Input::Deleted(Err(e))) => e,
                 _ => panic!("{c:?} answered by {i:?}"),
             };
             assert_eq!(err.kind, ErrorKind::Timeout);
@@ -526,27 +483,16 @@ mod tests {
         // End to end in the machine: a start that never answers.
         let mut m = Model::new();
         m.update(Input::Start);
-        m.update(Input::Connected(Ok(crate::machine::DeviceInfo {
-            name: String::new(),
-            scan: ScanType::Press,
-        })));
+        m.update(Input::Connected(Ok(())));
         m.update(Input::Listed(Ok(vec![])));
-        m.update(Input::AddFinger);
-        let start = Command::EnrollStart(Finger::RightThumb);
-        assert_eq!(
-            m.update(Input::StartEnroll {
-                finger: Some(Finger::RightThumb),
-                label: None,
-            }),
-            [Command::Claim]
-        );
-        assert_eq!(
-            m.update(Input::Claimed(Ok(Some(5)))),
-            std::slice::from_ref(&start)
-        );
+        assert_eq!(m.update(Input::Enroll), [Command::Claim]);
+        let start = Command::EnrollStart;
+        assert_eq!(m.update(Input::Claimed(Ok(Some(5)))), [start]);
         assert_eq!(
             m.update(timed_out(&start, Deadlines::default().of(&start))),
             [Command::Release]
         );
+        m.update(Input::Released(Ok(())));
+        assert_eq!(m.message, Some(ErrorKind::Timeout.message()));
     }
 }

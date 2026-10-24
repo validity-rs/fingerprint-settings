@@ -82,14 +82,9 @@ impl ServiceError {
         }
     }
 
-    /// The short title.
-    pub fn title(&self) -> Message {
-        self.kind.title()
-    }
-
-    /// The explanation and what to do.
-    pub fn description(&self) -> Message {
-        self.kind.description()
+    /// What to tell the user.
+    pub fn message(&self) -> Message {
+        self.kind.message()
     }
 }
 
@@ -152,44 +147,22 @@ impl ErrorKind {
         ErrorKind::Failed,
     ];
 
-    /// The short title.
-    pub fn title(self) -> Message {
+    /// What to tell the user: one plain sentence.
+    pub fn message(self) -> Message {
         match self {
-            ErrorKind::Unavailable => msg("The fingerprint service is not available"),
-            ErrorKind::NoReader => msg("No fingerprint reader found"),
-            ErrorKind::Busy => msg("The fingerprint reader is busy"),
-            ErrorKind::PermissionDenied => msg("Permission denied"),
-            ErrorKind::NoPrints => msg("No registered fingers"),
-            ErrorKind::AlreadyEnrolled => msg("This finger is already registered"),
-            ErrorKind::NotDeleted => msg("The fingerprint could not be removed"),
-            ErrorKind::Timeout => msg("The fingerprint service did not answer"),
-            ErrorKind::Unsupported | ErrorKind::Failed => msg("Something went wrong"),
-        }
-    }
-
-    /// The explanation and what to do.
-    pub fn description(self) -> Message {
-        match self {
-            ErrorKind::Unavailable => msg(
-                "No fingerprint service is running on this computer. Your password still works as usual.",
-            ),
-            ErrorKind::NoReader => msg(
-                "Check that the fingerprint reader is connected. If it is built into the computer, restart the computer, then try again.",
-            ),
-            ErrorKind::Busy => msg(
-                "Another program is using the reader right now, for example the lock screen. Wait a moment, then try again.",
-            ),
-            ErrorKind::PermissionDenied => msg(
-                "You are not allowed to change the fingerprints on this computer. Ask the person who looks after it.",
-            ),
-            ErrorKind::NoPrints => msg("Add a finger first, then you can test it."),
-            ErrorKind::AlreadyEnrolled => msg("Choose another finger, or remove this one first."),
-            ErrorKind::NotDeleted | ErrorKind::Timeout => {
-                msg("Wait a moment, then try again. If it happens again, restart the computer.")
+            ErrorKind::Unavailable => msg("The fingerprint service is not available."),
+            ErrorKind::NoReader => msg("No fingerprint reader detected."),
+            ErrorKind::Busy => {
+                msg("The reader is in use by another program. Try again in a moment.")
             }
-            ErrorKind::Unsupported | ErrorKind::Failed => msg(
-                "The fingerprint service reported a problem. Please try again. If it happens again, restart the computer.",
-            ),
+            ErrorKind::PermissionDenied => msg("Permission denied."),
+            ErrorKind::NoPrints => msg("No fingerprint registered."),
+            ErrorKind::AlreadyEnrolled => msg("This finger is already registered."),
+            ErrorKind::NotDeleted => msg("The fingerprint could not be removed. Try again."),
+            ErrorKind::Timeout => msg("The fingerprint service is not answering. Try again."),
+            ErrorKind::Unsupported | ErrorKind::Failed => {
+                msg("The fingerprint service reported an error. Try again.")
+            }
         }
     }
 }
@@ -406,32 +379,51 @@ mod tests {
         );
     }
 
+    /// Every error, and exactly what the user reads in French.
     #[test]
-    fn every_kind_has_plain_translated_text() {
-        let en = Catalogue::default();
+    fn every_kind_has_its_french_sentence() {
         let fr = Catalogue::builtin("fr").unwrap();
-        for k in ErrorKind::ALL {
-            let e = ServiceError::new(k, "detail");
-            for m in [e.title(), e.description()] {
-                let t = m.render(&en);
-                assert!(!t.is_empty());
-                // Plain language: no D-Bus jargon in what the user reads.
-                for jargon in [
-                    "D-Bus",
-                    "dbus",
-                    "fprintd",
-                    "polkit",
-                    "Error.",
-                    "net.reactivated",
-                ] {
-                    assert!(!t.contains(jargon), "{k:?}: {t}");
-                }
-                assert_ne!(m.render(&fr), t, "{k:?}: untranslated");
-            }
+        let cases = [
+            (
+                ErrorKind::Unavailable,
+                "Le service d'empreintes n'est pas disponible.",
+            ),
+            (ErrorKind::NoReader, "Aucun lecteur d'empreintes détecté."),
+            (
+                ErrorKind::Busy,
+                "Le lecteur est utilisé par un autre programme. Réessayez dans un instant.",
+            ),
+            (ErrorKind::PermissionDenied, "Autorisation refusée."),
+            (ErrorKind::NoPrints, "Aucune empreinte enregistrée."),
+            (ErrorKind::AlreadyEnrolled, "Ce doigt est déjà enregistré."),
+            (
+                ErrorKind::NotDeleted,
+                "L'empreinte n'a pas pu être supprimée. Réessayez.",
+            ),
+            (
+                ErrorKind::Timeout,
+                "Le service d'empreintes ne répond pas. Réessayez.",
+            ),
+            (
+                ErrorKind::Unsupported,
+                "Le service d'empreintes a signalé une erreur. Réessayez.",
+            ),
+            (
+                ErrorKind::Failed,
+                "Le service d'empreintes a signalé une erreur. Réessayez.",
+            ),
+        ];
+        assert_eq!(cases.len(), ErrorKind::ALL.len());
+        for (k, want) in cases {
+            assert_eq!(k.message().render(&fr), want, "{k:?}");
+            assert_eq!(ServiceError::new(k, "detail").message(), k.message());
         }
+        // polkit's refusal, by its D-Bus name.
         assert_eq!(
-            ErrorKind::Busy.title().render(&fr),
-            "Le lecteur d'empreintes est occupé"
+            ServiceError::from_dbus_name("net.reactivated.Fprint.Error.PermissionDenied", None)
+                .message()
+                .render(&fr),
+            "Autorisation refusée."
         );
     }
 }

@@ -7,8 +7,8 @@
 
   <name>Fingerprints</name>
   <name xml:lang="fr">Empreintes digitales</name>
-  <summary>Add, test and remove the fingerprints that unlock your computer</summary>
-  <summary xml:lang="fr">Ajouter, tester et supprimer les empreintes qui déverrouillent votre ordinateur</summary>
+  <summary>Register your right index finger to unlock your computer</summary>
+  <summary xml:lang="fr">Enregistrer votre index droit pour déverrouiller votre ordinateur</summary>
 
   <developer id="io.github.validity_rs">
     <name>validity-rs contributors</name>
@@ -16,14 +16,15 @@
 
   <description>
     <p>
-      Register your fingers to unlock the computer by touching the fingerprint reader,
-      check that a finger is recognised, and remove fingerprints you no longer use.
-      Your password always keeps working.
+      Register your right index finger to unlock the computer by touching the
+      fingerprint reader, or remove it. One plain screen: the status, one big button,
+      and a plain sentence for every result. Your password always keeps working.
     </p>
     <p xml:lang="fr">
-      Enregistrez vos doigts pour déverrouiller l'ordinateur en touchant le lecteur
-      d'empreintes, vérifiez qu'un doigt est bien reconnu, et supprimez les empreintes
-      dont vous ne vous servez plus. Votre mot de passe fonctionne toujours.
+      Enregistrez votre index droit pour déverrouiller l'ordinateur en touchant le
+      lecteur d'empreintes, ou supprimez-le. Un seul écran simple : l'état, un grand
+      bouton, et une phrase claire pour chaque résultat. Votre mot de passe fonctionne
+      toujours.
     </p>
     <p>
       Made for desktops without fingerprint settings of their own, such as Xfce, MATE
@@ -36,8 +37,8 @@
       l'interface D-Bus de fprintd, fprintd lui-même compris.
     </p>
     <ul>
-      <li>Large, plain instructions while a finger is being registered</li>
-      <li xml:lang="fr">De grandes consignes simples pendant l'enregistrement d'un doigt</li>
+      <li>Large, plain instructions while the finger is being registered</li>
+      <li xml:lang="fr">De grandes consignes simples pendant l'enregistrement du doigt</li>
       <li>Usable with the keyboard alone and with a screen reader</li>
       <li xml:lang="fr">Utilisable au clavier seul et avec un lecteur d'écran</li>
       <li>English and French</li>

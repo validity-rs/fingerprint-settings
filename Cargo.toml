@@ -14,9 +14,6 @@ publish = false
 adw = { package = "libadwaita", version = "0.9.2", features = ["v1_7"] }
 futures-core = "0.3.34"
 gtk = { package = "gtk4", version = "0.11.5", features = ["v4_18"] }
-# The names file (~/.config/fingerprint-settings/names.toml): read and written
-# as plain TOML (Table and Value need the "serde" feature; no derive is used).
-toml = { version = "1.1.8", default-features = false, features = ["std", "parse", "display", "serde"] }
 # The D-Bus side runs on a thread of its own, driven by zbus::block_on.
 zbus = { version = "6.1.0", default-features = false, features = ["default-rt", "proxy"] }
 # A runtime-agnostic channel between the GTK main loop and the D-Bus thread,
@@ -57,8 +54,8 @@ priority = "optional"
 depends = "$auto, fprintd | validity-daemon"
 changelog = "packaging/debian/changelog"
 extended-description = """\
-A small desktop application to manage your own fingerprints: add one, name \
-it, test it, rename it, remove it. Made for desktops without fingerprint \
+A small desktop application to register your right index finger, or remove \
+it, in one plain screen. Made for desktops without fingerprint \
 settings of their own, such as Xfce, MATE and LXQt. It works with any \
 fingerprint service that speaks the fprintd D-Bus interface, fprintd itself \
 included. Your password always keeps working."""
