@@ -44,6 +44,9 @@ as_builder() {
         SRCDEST="$work/distfiles" REPODEST="$work/packages" SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" "$@"
 }
 as_builder abuild-keygen -a -n -q
+# abuild indexes the packages it signed with apk, which must trust the key
+# (abuild-keygen -i would need root; this script is root, builder is not).
+cp /home/builder/.abuild/*.rsa.pub /etc/apk/keys/
 apkbuild-lint "$build/APKBUILD"
 echo "apkbuild-lint: clean"
 # -d: the build dependencies are in the image already (no root here to add them).
