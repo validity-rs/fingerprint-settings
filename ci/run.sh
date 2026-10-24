@@ -5,14 +5,14 @@
 #   ci/run.sh                 # every job
 #   ci/run.sh clippy test     # selected jobs
 #
-# The Rust jobs (fmt clippy doc test) run in the pinned Debian 13 image
+# The Rust jobs (fmt clippy doc test e2e) run in the pinned Debian 13 image
 # (docker/Dockerfile.debian) when docker is there; CI_HOST=1 runs them on the
 # host instead (needs Rust, libgtk-4-dev, libadwaita-1-dev, dbus-daemon).
 #
-# The end-to-end test needs validity-rs's daemon (a dev-dependency by path,
-# ../validity-rs). When that checkout is missing it is cloned from
-# $VALIDITY_RS_URL at $VALIDITY_RS_REV, the revision this tree was tested
-# against.
+# The end-to-end test is a package of its own (e2e/), which depends on
+# validity-rs's daemon by git URL and commit (e2e/Cargo.toml): cargo fetches
+# it from GitHub, and Cargo.lock is checked as it is (--locked). Nothing else
+# needs validity-rs.
 #
 # Tools that are not cargo subcommands are downloaded once, checked against a
 # pinned SHA-256 and cached in $CI_TOOLS (default ~/.cache/fingerprint-settings-ci).
@@ -23,8 +23,6 @@ GITLEAKS_VERSION=8.30.1
 GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
 ZIZMOR_VERSION=1.31.1
 ZIZMOR_SHA256=d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
-VALIDITY_RS_URL=${VALIDITY_RS_URL:-https://github.com/validity-rs/validity-rs.git}
-VALIDITY_RS_REV=${VALIDITY_RS_REV:-d2b35f1f536170d04a17cb006b680c0b2342e75e}
 IMAGE=fingerprint-settings-ci-debian
 
 cd "$(git rev-parse --show-toplevel)"
@@ -63,29 +61,18 @@ tool_zizmor() {
     echo "$CI_TOOLS/zizmor-$ZIZMOR_VERSION"
 }
 
-# The daemon the end-to-end test runs, next to this checkout.
-validity_rs() {
-    local dir=../validity-rs
-    [ -d "$dir" ] && return 0
-    git clone --quiet "$VALIDITY_RS_URL" "$dir"
-    git -C "$dir" checkout --quiet --detach "$VALIDITY_RS_REV"
-}
-
 use_image() { [ -z "${CI_HOST:-}" ] && command -v docker >/dev/null; }
 
-# Runs a shell command in the Debian image, with this checkout and its
-# ../validity-rs sibling mounted side by side. Target directory and crate
-# downloads live in named volumes, so the host's target/ stays free of
-# root-owned files.
+# Runs a shell command in the Debian image, with this checkout at /src.
+# Target directory, crate downloads and cargo's git checkouts live in named
+# volumes, so the host's target/ stays free of root-owned files.
 in_image() {
-    local here parent
-    here=$(basename "$PWD")
-    parent=$(dirname "$PWD")
     docker build -q -t "$IMAGE" -f docker/Dockerfile.debian docker >/dev/null
     docker run --rm \
-        -v "$parent:/src" -w "/src/$here" \
+        -v "$PWD:/src" -w /src \
         -v fingerprint-settings-target:/target -e CARGO_TARGET_DIR=/target \
         -v fingerprint-settings-cargo:/usr/local/cargo/registry \
+        -v fingerprint-settings-cargo-git:/usr/local/cargo/git \
         -e RUSTFLAGS -e RUSTDOCFLAGS -e CARGO_TERM_COLOR -e CARGO_NET_RETRY \
         "$IMAGE" sh -c "rustc --version && $*"
 }
@@ -93,21 +80,26 @@ in_image() {
 run() { if use_image; then in_image "$*"; else sh -c "$*"; fi; }
 
 job_noai() { bash .github/scripts/no-ai-traces.sh HEAD; }
-# Every finding fails, informational ones included.
-job_zizmor() { "$(tool_zizmor)" --offline --persona=pedantic --min-severity=unknown .github/workflows; }
+# Every finding fails (the pedantic persona reports all of them).
+job_zizmor() { "$(tool_zizmor)" --offline --persona=pedantic .github/workflows; }
 job_gitleaks() { "$(tool_gitleaks)" git --redact --exit-code 1 --no-banner .; }
-job_fmt() { validity_rs && run cargo fmt --all --check; }
-job_clippy() { validity_rs && run cargo clippy --all-targets -- -D warnings; }
-job_doc() { validity_rs && run cargo doc --no-deps; }
-job_test() {
-    validity_rs
+# e2e/ is a package of its own: rustfmt checks its files without resolving
+# its dependencies, so that fmt never needs validity-rs.
+job_fmt() { run "cargo fmt --all --check && rustfmt --check --edition 2024 e2e/src/*.rs e2e/tests/*.rs e2e/examples/*.rs"; }
+job_clippy() { run cargo clippy --locked --all-targets -- -D warnings; }
+job_doc() { run cargo doc --locked --no-deps; }
+job_test() { run cargo test --locked; }
+# The end-to-end test: e2e/ against validity-rs's daemon, at the commit
+# e2e/Cargo.toml pins.
+job_e2e() {
     if ! use_image; then
         command -v dbus-daemon >/dev/null || {
             echo "dbus-daemon is needed by the end-to-end test (Debian: apt install dbus-daemon)" >&2
             return 1
         }
     fi
-    run cargo test
+    run "cargo clippy --manifest-path e2e/Cargo.toml --locked --all-targets -- -D warnings" \
+        "&& cargo test --manifest-path e2e/Cargo.toml --locked"
 }
 # The desktop entry and the AppStream metainfo (validate with the image's
 # tools, or the host's: desktop-file-utils, appstream).
@@ -116,7 +108,7 @@ job_packaging() {
         "&& appstreamcli validate --no-net packaging/common/$APP_ID.metainfo.xml"
 }
 
-ALL=(noai zizmor gitleaks fmt clippy doc test packaging)
+ALL=(noai zizmor gitleaks fmt clippy doc test packaging e2e)
 
 jobs=("$@")
 [ ${#jobs[@]} -eq 0 ] && jobs=("${ALL[@]}")

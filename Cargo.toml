@@ -23,14 +23,8 @@ zbus = { version = "6.1.0", default-features = false, features = ["default-rt", 
 # and the deadlines of the calls (zbus's own runtime).
 zruntime = { version = "0.2.1", default-features = false, features = ["mpmc", "runtime"] }
 
-[dev-dependencies]
-nix = { version = "0.31.3", default-features = false, features = ["user"] }
-# The fprintd-compatible daemon with its emulated sensor, for the end-to-end
-# test. A path dependency on a validity-rs checkout next to this one until
-# validity-rs is published; CI clones it there (see ci/run.sh).
-validity-daemon = { path = "../validity-rs/crates/validity-daemon" }
-zbus = { version = "6.1.0", default-features = false, features = ["default-rt", "proxy", "service"] }
-zruntime = { version = "0.2.1", default-features = false, features = ["mpmc", "runtime", "helper"] }
+# No dev-dependencies: the end-to-end test against validity-rs's daemon is a
+# package of its own, e2e/, so that nothing here depends on validity-rs.
 
 [lints.rust]
 # No warning is tolerated: a plain `cargo build/test/clippy/doc` fails on any.

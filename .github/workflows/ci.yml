@@ -62,8 +62,7 @@ jobs:
         env:
           CI_TOOLS: ${{ runner.temp }}
 
-  # The Rust jobs run in the Debian 13 image (docker/Dockerfile.debian), with
-  # validity-rs cloned next to the checkout at the pinned revision.
+  # The Rust jobs run in the Debian 13 image (docker/Dockerfile.debian).
   rust:
     name: ${{ matrix.job }}
     runs-on: ubuntu-latest
@@ -79,3 +78,14 @@ jobs:
       - run: ci/run.sh "$JOB"
         env:
           JOB: ${{ matrix.job }}
+
+  # The application's core against validity-rs's daemon with its emulated
+  # sensor (e2e/), validity-rs fetched by cargo at the pinned commit.
+  e2e:
+    name: End to end (validity-rs daemon)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh e2e

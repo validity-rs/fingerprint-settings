@@ -1,0 +1,38 @@
+# The end-to-end test and the demo service: the application's core against
+# validity-rs's fprintd-compatible daemon with its emulated sensor.
+#
+# A package of its own, outside the application's (its own workspace and
+# Cargo.lock), so that building, testing and packaging the application never
+# needs validity-rs. Cargo fetches validity-rs from GitHub at the pinned
+# commit (see the README, "Tests").
+[package]
+name = "fingerprint-settings-e2e"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+fingerprint-settings = { path = ".." }
+nix = { version = "0.31.3", default-features = false, features = ["user"] }
+# Pinned by commit. Bump the revision and run `cargo update -p validity-daemon
+# --manifest-path e2e/Cargo.toml` together.
+validity-daemon = { git = "https://github.com/validity-rs/validity-rs.git", rev = "dba28e2004824d945bcec7f1d89214d88d7468e5" }
+zbus = { version = "6.1.0", default-features = false, features = ["default-rt", "proxy", "service"] }
+zruntime = { version = "0.2.1", default-features = false, features = ["mpmc", "runtime", "helper"] }
+
+# The application's lints (../Cargo.toml).
+[lints.rust]
+warnings = "deny"
+unsafe_code = "forbid"
+missing_debug_implementations = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[lints.rustdoc]
+all = { level = "deny", priority = -1 }

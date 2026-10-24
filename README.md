@@ -37,9 +37,9 @@ App id: `io.github.validity_rs.FingerprintSettings`. License: MIT.
   (Debian/Ubuntu: `libgtk-4-dev libadwaita-1-dev`; Fedora: `gtk4-devel
   libadwaita-devel`; Arch: `gtk4 libadwaita`; Alpine: `gtk4.0-dev
   libadwaita-dev`).
-- To run the tests: `dbus-daemon` (Debian: `dbus-daemon`; Fedora, Arch,
-  Alpine: `dbus`), and a checkout of validity-rs next to this one (see
-  below).
+- To run the end-to-end test: `dbus-daemon` (Debian: `dbus-daemon`;
+  Fedora, Arch, Alpine: `dbus`) and network access to GitHub, where cargo
+  fetches validity-rs (see "Tests").
 
 Whether you may change your fingerprints is decided by the service's polkit
 policy (`net.reactivated.fprint.device.enroll`). fprintd's default asks for
@@ -99,13 +99,14 @@ the Settings Manager under Hardware.
 
 ### Trying it without a reader
 
-`examples/demo_service.rs` runs validity-rs's daemon with its emulated sensor
-on a private bus; the application finds it through `DBUS_SYSTEM_BUS_ADDRESS`:
+`e2e/examples/demo_service.rs` runs validity-rs's daemon with its emulated
+sensor on a private bus; the application finds it through
+`DBUS_SYSTEM_BUS_ADDRESS`:
 
 ```bash
 dbus-daemon --session --nofork --print-address=1 > /tmp/demo-bus &
 sleep 1; BUS=$(head -1 /tmp/demo-bus)
-cargo run --example demo_service -- --address "$BUS" &
+cargo run --manifest-path e2e/Cargo.toml --example demo_service -- --address "$BUS" &
 DBUS_SYSTEM_BUS_ADDRESS="$BUS" cargo run
 # While the application waits for a finger, "touch" the emulated reader
 # (finger number 1; another number is another finger):
@@ -117,7 +118,8 @@ gdbus call --address "$BUS" --dest io.github.validity_rs.FingerprintSettings.Dem
 ## Tests
 
 ```bash
-cargo test
+cargo test                                   # the application
+cargo test --manifest-path e2e/Cargo.toml    # the end-to-end test
 ```
 
 - Unit tests of the UI-free core (`src/machine.rs` and its tests, `status`,
@@ -125,29 +127,34 @@ cargo test
   result, every error path, cancelling at each step, the rule that a claimed
   reader is always released, naming, renaming and slot allocation, and the
   names file (round trip, corrupt or unreadable file, clean-up).
-- `tests/end_to_end.rs`: the same core and D-Bus driver as the window, against
-  validity-rs's daemon with its emulated sensor on a private `dbus-daemon`:
-  enrol, list, test, remove, duplicates, cancels, a busy reader, polkit
-  refusals, no service, no reader, the service going away, an older service
-  without `DeleteEnrolledFinger`, a service that never answers, and named
-  fingerprints saved to a real names file.
 - `tests/translations.rs`: every user-visible string has a French
   translation, the catalogue has nothing stale, placeholders and French
   typography are right; the desktop entry and metainfo are translated.
+- `e2e/tests/end_to_end.rs`: the same core and D-Bus driver as the window,
+  against validity-rs's daemon with its emulated sensor on a private
+  `dbus-daemon`: enrol, list, test, remove, duplicates, cancels, a busy
+  reader, polkit refusals, no service, no reader, the service going away, an
+  older service without `DeleteEnrolledFinger`, a service that never
+  answers, and named fingerprints saved to a real names file.
 
-The end-to-end test uses validity-rs as a path dev-dependency:
-**validity-rs must be checked out next to this repository**
-(`../validity-rs`). `ci/run.sh` clones it there at the revision this tree was
-tested against when it is missing. Once validity-rs is published, the
-dependency becomes a git (or crates.io) dependency and the sibling checkout
-goes away.
+The end-to-end test and the demo service are a package of their own, `e2e/`
+(its own workspace and `Cargo.lock`), so that building, testing and
+packaging the application never needs validity-rs. `e2e/Cargo.toml` depends
+on validity-rs's daemon by git URL, pinned by commit: cargo fetches it from
+GitHub. To move to another validity-rs commit, change `rev` there and run
+`cargo update -p validity-daemon --manifest-path e2e/Cargo.toml`. To try a
+local validity-rs checkout instead, without touching the tracked files, add
+`--config 'patch."https://github.com/validity-rs/validity-rs.git".validity-daemon.path="../validity-rs/crates/validity-daemon"'`
+to the cargo command (then without `--locked`, and do not commit the
+`e2e/Cargo.lock` it rewrites).
 
 ### CI
 
 `ci/run.sh` is the whole CI, runnable locally: `noai zizmor gitleaks fmt
-clippy doc test packaging`. The Rust jobs run in the pinned Debian 13 image
-(`docker/Dockerfile.debian`) when docker is available, or on the host with
-`CI_HOST=1`. GitHub Actions (`.github/workflows/ci.yml`) calls the same jobs.
+clippy doc test packaging e2e`. The Rust jobs run in the pinned Debian 13
+image (`docker/Dockerfile.debian`) when docker is available, or on the host
+with `CI_HOST=1`. GitHub Actions (`.github/workflows/ci.yml`) calls the same
+jobs.
 
 ## Architecture
 
