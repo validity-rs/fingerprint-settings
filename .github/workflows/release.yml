@@ -71,6 +71,8 @@ jobs:
     needs: tarball
     runs-on: ubuntu-latest
     strategy:
+      # Every package's result is worth seeing, even when one fails.
+      fail-fast: false
       matrix:
         distro: [debian, fedora, archlinux, alpine]
     steps:

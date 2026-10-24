@@ -247,14 +247,24 @@ build_package() {
     drun "$img" sh -c "ci/packages/$d.sh '$tarball' '$out'; rc=\$?; $(give_back dist); exit \$rc"
 }
 
-# The packages of two builds must be the same bytes. Alpine's .apk carries
-# its signature (made with a key generated for each image) and the build
-# time, so it is compared without its signature.
+# The packages of two builds must be the same bytes. An .apk starts with its
+# signature, made with a key generated for each build: it is compared by its
+# .PKGINFO instead, which holds the SHA-256 of the data and the build date.
 reproducible() {
     local d=$1 f g bad=0
     for f in "dist/$d"/*; do
         case $f in */stub_service | *.rsa.pub) continue ;; esac
         g="dist/$d.again/$(basename "$f")"
+        if [[ $f == *.apk ]]; then
+            if cmp -s <(tar -xzOif "$f" .PKGINFO) <(tar -xzOif "$g" .PKGINFO); then
+                echo "reproducible (but for its signature): $(basename "$f")"
+            else
+                echo "NOT reproducible: $(basename "$f")" >&2
+                diff <(tar -xzOif "$f" .PKGINFO) <(tar -xzOif "$g" .PKGINFO) >&2
+                bad=1
+            fi
+            continue
+        fi
         if cmp -s "$f" "$g"; then
             echo "reproducible: $(basename "$f")"
         else

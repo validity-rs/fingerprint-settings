@@ -227,7 +227,9 @@ the version in `Cargo.toml`):
    `.cargo/config.toml`, so the packages build offline; every time is the
    last commit's, `SOURCE_DATE_EPOCH`);
 3. builds every package from it, twice, and checks that the two builds are
-   the same bytes, then runs the package cycle;
+   the same bytes (the `.apk`, whose signature is made with a key generated
+   for each build, by its `.PKGINFO`: the data's SHA-256 and the build
+   date), then runs the package cycle;
 4. writes `SHA256SUMS` and a build provenance attestation (Sigstore-signed,
    SLSA) for every file, `SHA256SUMS` included;
 5. creates a **draft** GitHub release with the tarball, the packages, the
