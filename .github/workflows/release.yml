@@ -1,0 +1,173 @@
+name: Release
+
+# A version tag (v0.1.0) releases that commit, only once the whole CI is green
+# on it: the CI workflow runs first, here, on the tagged commit. Then:
+#   1. the vendored source tarball, built twice and compared;
+#   2. every package built from that tarball in its pinned distro container
+#      (twice, and compared where the format allows), checked, installed,
+#      launched headless and removed in a fresh container;
+#   3. SHA256SUMS, and a build provenance attestation (Sigstore-signed, SLSA)
+#      for every file and for SHA256SUMS itself;
+#   4. a draft GitHub release with all of it, published by hand after a look;
+#   5. crates.io, through Trusted Publishing (no stored token), only once
+#      Cargo.toml allows it (publish = false today: the job says so and stops).
+#
+# workflow_dispatch is a dry run of 1 to 3 on any branch: everything is built
+# and checked, and nothing is attested, released or published.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# One release per tag at a time, never cancelled half-way. (The CI workflow,
+# called below, has its own group.)
+concurrency:
+  group: release-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+
+jobs:
+  ci:
+    name: CI
+    # The same commit's CI workflow (self-repository syntax: it cannot be
+    # swapped by a file written at run time).
+    uses: $/.github/workflows/ci.yml
+
+  tarball:
+    name: Vendored tarball
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag names the version in Cargo.toml
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match Cargo.toml's version $version"
+            exit 1
+          fi
+      - run: ci/run.sh tarball
+        env:
+          REPRODUCE: "1"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tarball
+          path: dist/fingerprint-settings-*.tar.gz
+          if-no-files-found: error
+
+  packages:
+    name: Package (${{ matrix.distro }})
+    needs: tarball
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        distro: [debian, fedora, archlinux, alpine]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tarball
+          path: dist
+      # Built twice and compared (REPRODUCE), from the tarball above.
+      - run: ci/run.sh "package:$DISTRO"
+        env:
+          DISTRO: ${{ matrix.distro }}
+          KEEP_TARBALL: "1"
+          REPRODUCE: "1"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.distro }}
+          # .SRCINFO is a dot file: uploaded on purpose.
+          include-hidden-files: true
+          path: dist/${{ matrix.distro }}/
+          if-no-files-found: error
+
+  release:
+    name: Checksums, attestations, draft release
+    needs: packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the draft release
+      id-token: write # Sigstore signing of the attestations
+      attestations: write # the provenance attestations
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tarball
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: package-*
+          path: dist/packages
+      - name: Release files and SHA256SUMS
+        run: |
+          for d in debian fedora archlinux alpine; do mv "dist/packages/package-$d" "dist/$d"; done
+          ci/run.sh release-files
+      - name: Keep the dry run's files
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dry-run
+          path: dist/release/
+          if-no-files-found: error
+      - name: Attest build provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/release/*
+      - name: Draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag --repo "$GITHUB_REPOSITORY" \
+            --title "Fingerprints $TAG" \
+            --notes "Packages for Debian 13, Fedora, Arch Linux and Alpine 3.24, built from the vendored source tarball. Check a file with \`sha256sum -c SHA256SUMS\` and its provenance with \`gh attestation verify FILE --repo $GITHUB_REPOSITORY\`." \
+            dist/release/*
+
+  crates-io:
+    name: crates.io (Trusted Publishing)
+    needs: release
+    if: github.ref_type == 'tag' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # exchanged with crates.io for a short-lived token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Does Cargo.toml allow publishing?
+        id: allowed
+        run: |
+          if sed -n '/^\[package\]/,/^\[/p' Cargo.toml | grep -qx 'publish = false'; then
+            echo "::notice title=crates.io::Not published: Cargo.toml says publish = false. Remove it (and set up Trusted Publishing on crates.io) to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Token from crates.io (Trusted Publishing)
+        if: steps.allowed.outputs.publish == 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: cargo publish
+        if: steps.allowed.outputs.publish == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: ci/run.sh publish

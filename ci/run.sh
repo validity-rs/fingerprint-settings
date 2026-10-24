@@ -27,6 +27,8 @@
 #                          launch and removal in a fresh container; in
 #                          dist/<d>/. REPRODUCE=1 builds the package twice
 #                          and fails if the two differ.
+#   release-files          the release's files and SHA256SUMS, in dist/release/
+#   publish                cargo publish (the release workflow)
 #
 # The end-to-end test is a package of its own (e2e/), which depends on
 # validity-rs's daemon by git URL and commit (e2e/Cargo.toml): cargo fetches
@@ -211,9 +213,13 @@ job_tarball() {
 
 # package:<distro>: the tarball, then the package built and checked in the
 # package stage, then installed, launched and removed in the install stage.
+# KEEP_TARBALL=1 uses the tarball already in dist/ (the release workflow
+# builds it once, for every package).
 job_package() {
     local d
-    job_tarball || return 1
+    if [ -z "${KEEP_TARBALL:-}" ]; then
+        job_tarball || return 1
+    fi
     for d in "${@:-${DISTROS[@]}}"; do
         say "package $d"
         package_one "$d" || return 1
@@ -260,6 +266,32 @@ reproducible() {
     return "$bad"
 }
 
+# The release's files, from the packages in dist/<distro>/, in dist/release/:
+# the tarball, the packages, the AUR and Alpine build recipes under
+# versioned names, and SHA256SUMS. CI-only files (stub_service, Alpine's
+# throwaway public key) are left out.
+job_release_files() {
+    local v d=dist/release
+    v=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+    rm -rf "$d"
+    mkdir -p "$d"
+    cp "dist/fingerprint-settings-$v.tar.gz" "$d/"
+    cp dist/debian/fingerprint-settings_*.deb "$d/"
+    cp dist/fedora/fingerprint-settings-*.rpm "$d/"
+    cp dist/archlinux/fingerprint-settings-*.pkg.tar.zst "$d/"
+    cp dist/archlinux/PKGBUILD "$d/fingerprint-settings-$v.PKGBUILD"
+    cp dist/archlinux/.SRCINFO "$d/fingerprint-settings-$v.SRCINFO"
+    cp dist/alpine/fingerprint-settings-*.apk "$d/"
+    cp dist/alpine/APKBUILD "$d/fingerprint-settings-$v.APKBUILD"
+    (cd "$d" && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+}
+
+# cargo publish, in the Debian image (the crate's build needs GTK), with the
+# short-lived token of crates.io's Trusted Publishing (CARGO_REGISTRY_TOKEN).
+job_publish() {
+    in_image debian -e CARGO_REGISTRY_TOKEN -- cargo publish --locked
+}
+
 QUICK=(noai zizmor gitleaks fmt clippy doc test packaging e2e)
 ALL=("${QUICK[@]}" distro:fedora distro:archlinux distro:alpine package)
 
@@ -272,7 +304,7 @@ for j in "${jobs[@]}"; do
     name=${j%%:*}
     arg=${j#*:}
     [ "$arg" = "$j" ] && arg=
-    fn="job_$name"
+    fn="job_${name//-/_}"
     if ! declare -F "$fn" >/dev/null; then echo "unknown job: $j" >&2; exit 2; fi
     say "$j"
     if ! "$fn" ${arg:+"$arg"}; then failed+=("$j"); fi

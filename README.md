@@ -115,8 +115,8 @@ Notes:
 
 - The PKGBUILD and the APKBUILD are templates: the build writes the version
   from `Cargo.toml` and the tarball's checksum into them (makepkg and abuild
-  then check the tarball against it), and leaves the written ones in
-  `dist/<distro>/`, for the AUR and for aports.
+  then check the tarball against it). The release attaches the written ones,
+  for the AUR and for aports.
 - Alpine 3.24's Rust (1.96) is older than the crate's `rust-version`
   (1.99): the Alpine package is built with the official `rust:1.99.1-alpine3.24`
   image's toolchain, and links dynamically (`-C target-feature=-crt-static`)
@@ -207,15 +207,40 @@ them):
   `CI_HOST=1`;
 - `distro:<distro>`: `cargo test` on Debian 13, Fedora, Arch Linux and
   Alpine 3.24, each with its own GTK 4 and libadwaita;
-- `package:<distro>`: the full package cycle above (`REPRODUCE=1` builds
-  each package twice and fails if the two differ);
-- `tarball`: the vendored source tarball alone.
+- `package:<distro>`: the full package cycle above;
+- `tarball`, `release-files`, `publish`: used by the release workflow.
 
 Every image is pinned by digest (`docker/Dockerfile.<distro>`, one per
 distro, with `ci`, `package` and `install` stages), every action by commit,
 every downloaded tool by version and SHA-256. GitHub Actions
 (`.github/workflows/ci.yml`) calls the same jobs; it also keeps each
 commit's packages as artifacts for two weeks.
+
+### Release
+
+`.github/workflows/release.yml`, on a version tag (`v0.1.0`, which must be
+the version in `Cargo.toml`):
+
+1. runs the whole CI on the tagged commit, and goes on only if it is green;
+2. builds the vendored source tarball twice and checks that both are the
+   same bytes (`ci/packages/tarball.sh`: the tracked files plus `vendor/` and
+   `.cargo/config.toml`, so the packages build offline; every time is the
+   last commit's, `SOURCE_DATE_EPOCH`);
+3. builds every package from it, twice, and checks that the two builds are
+   the same bytes, then runs the package cycle;
+4. writes `SHA256SUMS` and a build provenance attestation (Sigstore-signed,
+   SLSA) for every file, `SHA256SUMS` included;
+5. creates a **draft** GitHub release with the tarball, the packages, the
+   written PKGBUILD, `.SRCINFO` and APKBUILD, and `SHA256SUMS`;
+6. publishes to crates.io through Trusted Publishing (no stored token) only
+   once `Cargo.toml` allows it: today it says `publish = false`, and the job
+   says so in a notice.
+
+Check a downloaded file with `sha256sum -c SHA256SUMS --ignore-missing` and
+`gh attestation verify FILE --repo validity-rs/fingerprint-settings`. Run by
+hand (`workflow_dispatch`), the workflow is a dry run: everything is built
+and checked, nothing is attested, released or published, and the files are
+kept as an artifact.
 
 ## Architecture
 
