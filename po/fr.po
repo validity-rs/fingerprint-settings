@@ -5,7 +5,7 @@
 # French typography: a no-break space (U+00A0) before ":", "?" and "!".
 msgid ""
 msgstr ""
-"Project-Id-Version: fingerprint-settings 0.1.0\n"
+"Project-Id-Version: fingerprint-settings 0.1.1\n"
 "Language: fr\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"

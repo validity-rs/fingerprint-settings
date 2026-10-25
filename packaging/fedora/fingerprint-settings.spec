@@ -6,7 +6,7 @@
 %global appid io.github.validity_rs.FingerprintSettings
 
 Name:           fingerprint-settings
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Manage your own fingerprints with any fprintd-compatible service
 
@@ -80,6 +80,9 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{appid}.metainfo.xml
 %{_mandir}/man1/%{name}.1*
 
 %changelog
+* Sun Oct 25 2026 pierre-warnier <409744+pierre-warnier@users.noreply.github.com> - 0.1.1-1
+- One screen for the right index finger, a progress bar, plain instructions.
+
 * Fri Oct 23 2026 pierre-warnier <409744+pierre-warnier@users.noreply.github.com> - 0.1.0-1
 - First release: add, name, test, rename and remove your own fingerprints
   with any fprintd-compatible service.
