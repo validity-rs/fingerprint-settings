@@ -36,7 +36,10 @@ fn enrolling(m: &Model) -> &Enroll {
 fn scanning() -> Model {
     let mut m = ready(&[]);
     assert_eq!(m.update(Input::Enroll), [Command::Claim]);
-    assert_eq!(fr(&enrolling(&m).instruction), "Préparation du lecteur…");
+    assert_eq!(
+        fr(&enrolling(&m).instruction),
+        "Préparation du lecteur, un instant…"
+    );
     assert_eq!(
         m.update(Input::Claimed(Ok(Some(6)))),
         [Command::EnrollStart]
@@ -54,14 +57,20 @@ fn status(s: &str, done: bool) -> Input {
 fn start_reads_the_status() {
     let m = ready(&[]);
     assert_eq!(m.enrolled, Some(false));
-    assert_eq!(fr(&m.status().unwrap()), "Aucune empreinte enregistrée");
+    assert_eq!(
+        fr(&m.status().unwrap()),
+        "Aucune empreinte n'est encore enregistrée."
+    );
     assert!(m.can_enroll() && !m.shows_remove() && !m.busy());
     // Another finger, enrolled with another tool, is not the right index.
     let m = ready(&["left-thumb"]);
     assert_eq!(m.enrolled, Some(false));
     let m = ready(&["left-thumb", FINGER]);
     assert_eq!(m.enrolled, Some(true));
-    assert_eq!(fr(&m.status().unwrap()), "Index droit enregistré");
+    assert_eq!(
+        fr(&m.status().unwrap()),
+        "Votre index droit est enregistré."
+    );
     assert!(!m.can_enroll() && m.shows_remove() && m.can_remove());
     // Not known before the list.
     let mut m = Model::default();
@@ -78,14 +87,17 @@ fn start_reads_the_status() {
 #[test]
 fn enroll_with_progress() {
     let mut m = scanning();
-    assert_eq!(fr(&enrolling(&m).instruction), "Posez le doigt…");
+    assert_eq!(
+        fr(&enrolling(&m).instruction),
+        "Posez votre index droit sur le lecteur."
+    );
     assert_eq!(enrolling(&m).fraction(), 0.0);
     assert!(m.holds_reader() && !m.can_enroll());
     // Good scans fill the indicator; the instruction never counts them.
     for n in 1..=5 {
         assert_eq!(m.update(status("enroll-stage-passed", false)), []);
         let e = enrolling(&m);
-        assert_eq!(fr(&e.instruction), "Relevez et reposez le doigt…");
+        assert_eq!(fr(&e.instruction), "Relevez le doigt, puis reposez-le.");
         assert_eq!(e.fraction(), f64::from(n) / 6.0);
     }
     // Scans that did not take: the same neutral hint, no blame, and the
@@ -100,7 +112,11 @@ fn enroll_with_progress() {
     ] {
         assert_eq!(m.update(status(s, false)), [], "{s}");
         let e = enrolling(&m);
-        assert_eq!(fr(&e.instruction), "Relevez et reposez le doigt…", "{s}");
+        assert_eq!(
+            fr(&e.instruction),
+            "Relevez le doigt, puis reposez-le.",
+            "{s}"
+        );
         assert_eq!((e.fraction(), e.outcome.clone()), (5.0 / 6.0, None), "{s}");
     }
     // A stage beyond the count does not go past the last one.
@@ -136,7 +152,7 @@ fn unknown_stage_count() {
     for want in [0.25, 0.4375, 0.578125] {
         m.update(status("enroll-stage-passed", false));
         let e = enrolling(&m);
-        assert_eq!(fr(&e.instruction), "Relevez et reposez le doigt…");
+        assert_eq!(fr(&e.instruction), "Relevez le doigt, puis reposez-le.");
         assert_eq!(e.fraction(), want);
         assert!(e.fraction() > last);
         last = e.fraction();
@@ -159,7 +175,10 @@ fn every_final_failure_releases_and_says_why() {
             "enroll-duplicate",
             "Ce doigt est déjà enregistré (peut-être sur un autre compte).",
         ),
-        ("enroll-data-full", "La mémoire du lecteur est pleine."),
+        (
+            "enroll-data-full",
+            "La mémoire du lecteur est pleine : il ne peut pas enregistrer d'autre empreinte.",
+        ),
         ("enroll-failed", "L'enregistrement a échoué. Réessayez."),
         (
             "enroll-unknown-error",
@@ -191,7 +210,7 @@ fn every_final_failure_releases_and_says_why() {
     m.update(Input::Released(Err(err(ErrorKind::NoReader))));
     assert_eq!(
         fr(m.message.as_ref().unwrap()),
-        "Le lecteur d'empreintes a été débranché."
+        "Le lecteur d'empreintes ne répond plus. Réessayez."
     );
 }
 
@@ -203,8 +222,14 @@ fn service_errors_become_sentences() {
             ErrorKind::Busy,
             "Le lecteur est utilisé par un autre programme. Réessayez dans un instant.",
         ),
-        (ErrorKind::PermissionDenied, "Autorisation refusée."),
-        (ErrorKind::NoReader, "Aucun lecteur d'empreintes détecté."),
+        (
+            ErrorKind::PermissionDenied,
+            "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande.",
+        ),
+        (
+            ErrorKind::NoReader,
+            "Aucun lecteur d'empreintes n'a été trouvé sur cet ordinateur.",
+        ),
     ] {
         let mut m = ready(&[]);
         m.update(Input::Enroll);
@@ -222,7 +247,7 @@ fn service_errors_become_sentences() {
     assert_eq!(m.update(Input::Released(Ok(()))), []);
     assert_eq!(
         fr(m.message.as_ref().unwrap()),
-        "Le service d'empreintes ne répond pas. Réessayez."
+        "Le programme des empreintes ne répond pas. Réessayez."
     );
     // polkit refuses the start: released.
     let mut m = ready(&[]);
@@ -233,7 +258,10 @@ fn service_errors_become_sentences() {
         [Command::Release]
     );
     m.update(Input::Released(Ok(())));
-    assert_eq!(fr(m.message.as_ref().unwrap()), "Autorisation refusée.");
+    assert_eq!(
+        fr(m.message.as_ref().unwrap()),
+        "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande."
+    );
     assert!(m.can_enroll());
 }
 
@@ -248,7 +276,7 @@ fn no_reader_at_start_then_enroll_looks_again() {
     assert_eq!(m.activity, Activity::Idle);
     assert_eq!(
         fr(m.message.as_ref().unwrap()),
-        "Aucun lecteur d'empreintes détecté."
+        "Aucun lecteur d'empreintes n'a été trouvé sur cet ordinateur."
     );
     assert_eq!(m.status(), None);
     // The button stays usable: it looks for the reader again.
@@ -260,7 +288,7 @@ fn no_reader_at_start_then_enroll_looks_again() {
     m.update(Input::Connected(Err(err(ErrorKind::Unavailable))));
     assert_eq!(
         fr(m.message.as_ref().unwrap()),
-        "Le service d'empreintes n'est pas disponible."
+        "Le programme des empreintes ne fonctionne pas. Redémarrez l'ordinateur, puis réessayez."
     );
     // Plugged in: found, listed, and the enrolment starts.
     m.update(Input::Enroll);
@@ -283,7 +311,10 @@ fn no_reader_at_start_then_enroll_looks_again() {
     m.update(Input::Start);
     m.update(Input::Connected(Ok(())));
     m.update(Input::Listed(Err(err(ErrorKind::PermissionDenied))));
-    assert_eq!(fr(m.message.as_ref().unwrap()), "Autorisation refusée.");
+    assert_eq!(
+        fr(m.message.as_ref().unwrap()),
+        "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande."
+    );
     assert_eq!(m.enrolled, None);
     assert_eq!(m.update(Input::Enroll), [Command::Claim]);
 }
@@ -378,7 +409,10 @@ fn remove() {
     assert_eq!(m.update(Input::Deleted(Ok(()))), [Command::Release]);
     assert_eq!(m.update(Input::Released(Ok(()))), [Command::List]);
     assert_eq!(m.enrolled, Some(false));
-    assert_eq!(fr(m.message.as_ref().unwrap()), "Empreinte supprimée.");
+    assert_eq!(
+        fr(m.message.as_ref().unwrap()),
+        "L'empreinte a été supprimée."
+    );
     assert!(!m.shows_remove() && m.can_enroll());
     // Not offered when nothing is enrolled.
     assert_eq!(m.update(Input::Remove), []);
@@ -401,7 +435,7 @@ fn remove_falls_back_to_delete_all_on_older_services() {
     m.update(Input::Released(Ok(())));
     assert_eq!(
         fr(m.message.as_ref().unwrap()),
-        "Le service d'empreintes a signalé une erreur. Réessayez."
+        "Le programme des empreintes a eu un problème. Réessayez."
     );
     assert_eq!(m.enrolled, Some(true));
     let mut m = ready(&[FINGER]);
@@ -416,7 +450,10 @@ fn remove_falls_back_to_delete_all_on_older_services() {
 #[test]
 fn remove_errors() {
     for (k, want) in [
-        (ErrorKind::PermissionDenied, "Autorisation refusée."),
+        (
+            ErrorKind::PermissionDenied,
+            "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande.",
+        ),
         (
             ErrorKind::NotDeleted,
             "L'empreinte n'a pas pu être supprimée. Réessayez.",
@@ -444,7 +481,7 @@ fn remove_errors() {
     assert_eq!(m.update(Input::Released(Ok(()))), [Command::List]);
     assert_eq!(
         fr(m.message.as_ref().unwrap()),
-        "Le service d'empreintes ne répond pas. Réessayez."
+        "Le programme des empreintes ne répond pas. Réessayez."
     );
     // A refresh that fails changes nothing.
     assert_eq!(m.update(Input::Listed(Err(err(ErrorKind::Failed)))), []);
@@ -453,7 +490,8 @@ fn remove_errors() {
 
 #[test]
 fn service_lost() {
-    let lost = "Le service d'empreintes n'est pas disponible.";
+    let lost =
+        "Le programme des empreintes ne fonctionne pas. Redémarrez l'ordinateur, puis réessayez.";
     // Mid-enrolment: over, nothing to release.
     let mut m = scanning();
     assert_eq!(m.update(Input::ServiceLost), []);
@@ -526,4 +564,42 @@ fn late_and_stray_inputs_are_ignored() {
     assert_eq!(m.update(Input::Enroll), []);
     // Start again from idle: a fresh look.
     assert_eq!(m.update(Input::Start), [Command::Connect]);
+}
+
+#[test]
+fn help_for_a_first_time_user() {
+    let where_ = "Le lecteur d'empreintes est la petite surface de l'ordinateur où l'on pose le doigt. Il s'allume quand il attend votre doigt.";
+    let how = "Posez le doigt à plat sur le lecteur quand il est allumé, puis relevez-le. Recommencez en bougeant un peu le doigt à chaque fois, jusqu'à ce que la barre soit pleine.";
+    let help = |m: &Model| m.help().map(|h| fr(&h));
+    // Not before the reader is found.
+    let mut m = Model::new();
+    assert_eq!(help(&m), None);
+    m.update(Input::Start);
+    assert_eq!(help(&m), None);
+    // Before registering: where the reader is.
+    let mut m = ready(&[]);
+    assert_eq!(help(&m).as_deref(), Some(where_));
+    // While registering, from the first moment: what to do.
+    m.update(Input::Enroll);
+    assert_eq!(help(&m).as_deref(), Some(how));
+    m.update(Input::Claimed(Ok(Some(6))));
+    m.update(Input::EnrollStarted(Ok(())));
+    m.update(status("enroll-retry-scan", false));
+    assert_eq!(help(&m).as_deref(), Some(how));
+    // Once it is over, while the reader is let go: nothing more to do.
+    m.update(status("enroll-completed", true));
+    assert_eq!(help(&m), None);
+    m.update(Input::EnrollStopped(Ok(())));
+    m.update(Input::Released(Ok(())));
+    // Registered: no more help, "Remove the fingerprint" is shown.
+    m.update(Input::Listed(Ok(vec![FINGER.into()])));
+    assert_eq!(help(&m), None);
+    assert_eq!(help(&ready(&[FINGER])), None);
+    // Cancelled: the screen is back to its start, with where the reader is.
+    let mut m = scanning();
+    m.update(Input::Cancel);
+    assert_eq!(help(&m), None);
+    m.update(Input::EnrollStopped(Ok(())));
+    m.update(Input::Released(Ok(())));
+    assert_eq!(help(&m).as_deref(), Some(where_));
 }

@@ -6,22 +6,32 @@ computer. It is meant for desktops that have no fingerprint settings of
 their own, such as **Xfce, MATE and LXQt**, and for people who want
 something plain and readable.
 
-One screen:
+One screen, written for someone who has never used a fingerprint reader:
 
-- a status line: "Index droit enregistré" (right index finger registered)
-  or "Aucune empreinte enregistrée" (no fingerprint registered);
+- a status line: "Votre index droit est enregistré." (your right index
+  finger is registered) or "Aucune empreinte n'est encore enregistrée." (no
+  fingerprint is registered yet);
+- before registering, where the reader is and that it lights up: "Le
+  lecteur d'empreintes est la petite surface de l'ordinateur où l'on pose le
+  doigt. Il s'allume quand il attend votre doigt." (the reader's place
+  depends on the laptop, so it is not named);
 - one big button, **Enregistrer mon index droit** (register my right index
-  finger); while you touch the reader, one progress bar fills with each
-  good scan and one gentle hint stays on screen ("Posez le doigt…", then
-  "Relevez et reposez le doigt…"): no scan count, and a scan that did not
-  take is not an error, the bar just waits for the next one, until it is
-  done;
-- **Supprimer** (remove), only when the finger is registered.
+  finger). While you touch the reader, one progress bar fills with each good
+  scan, with what to do ("Posez le doigt à plat sur le lecteur quand il est
+  allumé, puis relevez-le. Recommencez en bougeant un peu le doigt à chaque
+  fois, jusqu'à ce que la barre soit pleine.") and one gentle hint ("Posez
+  votre index droit sur le lecteur.", then "Relevez le doigt, puis
+  reposez-le."). No scan count, and a scan that did not take is not an
+  error: the bar waits for the next one, until it is full;
+- **Supprimer l'empreinte** (remove the fingerprint), only when the finger
+  is registered.
 
-Every result and error the service can give is one plain sentence (for
-example "Ce doigt est déjà enregistré (peut-être sur un autre compte).",
-"Autorisation refusée.", "Aucun lecteur d'empreintes détecté."), and the
-screen stays usable after any of them. The password always keeps working.
+Every result and error the service can give is one plain sentence that says
+what to do next (for example "Ce doigt est déjà enregistré (peut-être sur un
+autre compte).", "L'autorisation a été refusée. Réessayez, et tapez votre
+mot de passe si l'ordinateur le demande.", "Aucun lecteur d'empreintes n'a
+été trouvé sur cet ordinateur."), and the screen stays usable after any of
+them. The password always keeps working.
 English and French (the language follows the desktop's).
 
 App id: `io.github.validity_rs.FingerprintSettings`. License: MIT.
@@ -52,8 +62,9 @@ policy (`net.reactivated.fprint.device.enroll`). fprintd's default asks for
 **your own password** before adding or removing a fingerprint, so a polkit
 authentication agent must be running in the session (Xfce: `xfce-polkit` or
 `policykit-1-gnome`; MATE: `mate-polkit`; LXQt: `lxqt-policykit`). Without
-one, the application says « Autorisation refusée. ». A call that may show this
-prompt is given ten minutes; any other call one minute, after which the
+one, the application says « L'autorisation a été refusée. Réessayez, et
+tapez votre mot de passe si l'ordinateur le demande. ». A call that may show
+this prompt is given ten minutes; any other call one minute, after which the
 application says the service did not answer.
 
 ## Build, run, install

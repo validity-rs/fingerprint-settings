@@ -437,7 +437,7 @@ impl App {
         self.settle();
     }
 
-    /// "Remove", until it is over.
+    /// "Remove the fingerprint", until it is over.
     fn remove(&mut self) {
         self.input(Input::Remove);
         self.settle();
@@ -515,7 +515,7 @@ fn enrol_and_remove() {
             .status()
             .unwrap()
             .render(&Catalogue::builtin("fr").unwrap()),
-        "Aucune empreinte enregistrée"
+        "Aucune empreinte n'est encore enregistrée."
     );
     assert!(app.m.can_enroll() && !app.m.shows_remove());
 
@@ -540,14 +540,14 @@ fn enrol_and_remove() {
             .status()
             .unwrap()
             .render(&Catalogue::builtin("fr").unwrap()),
-        "Index droit enregistré"
+        "Votre index droit est enregistré."
     );
     assert_eq!(
         app.instructions,
         [
-            "Getting the reader ready…",
-            "Place your finger…",
-            "Lift and place your finger again…",
+            "Getting the reader ready, one moment…",
+            "Place your right index finger on the reader.",
+            "Lift your finger, then place it again.",
         ]
     );
     // One indicator, forward only, one step per good scan (the redundant
@@ -588,7 +588,7 @@ fn enrol_and_remove() {
     drop(fresh);
 
     app.remove();
-    assert_eq!(app.said(), "Empreinte supprimée.");
+    assert_eq!(app.said(), "L'empreinte a été supprimée.");
     assert_eq!(app.m.enrolled, Some(false));
     assert!(app.sent.ends_with(&[
         Command::Claim,
@@ -636,7 +636,10 @@ fn duplicate_other_fingers_and_cancel() {
         "scanning",
         |m| matches!(&m.activity, Activity::Enrolling(e) if e.step == Step::Scanning),
     );
-    assert_eq!(app.instructions.last().unwrap(), "Place your finger…");
+    assert_eq!(
+        app.instructions.last().unwrap(),
+        "Place your right index finger on the reader."
+    );
     app.input(Input::Cancel);
     app.settle();
     assert_eq!(app.said(), "Enregistrement annulé.");
@@ -679,7 +682,10 @@ fn busy_and_permission_denied() {
     // polkit refuses removal: nothing removed, the device released.
     env.authority.deny(ENROLL);
     app.remove();
-    assert_eq!(app.said(), "Autorisation refusée.");
+    assert_eq!(
+        app.said(),
+        "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande."
+    );
     assert_eq!(app.m.enrolled, Some(true));
     assert!(App::device_is_free(&env.bus.address));
 
@@ -690,7 +696,10 @@ fn busy_and_permission_denied() {
     assert_eq!(app.m.enrolled, Some(false));
     env.authority.deny(ENROLL);
     app.enroll(&env.fake, vec![]);
-    assert_eq!(app.said(), "Autorisation refusée.");
+    assert_eq!(
+        app.said(),
+        "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande."
+    );
     assert!(
         app.sent
             .ends_with(&[Command::Claim, Command::EnrollStart, Command::Release])
@@ -701,7 +710,10 @@ fn busy_and_permission_denied() {
     env.authority.deny(VERIFY);
     let mut denied = env.app();
     denied.start();
-    assert_eq!(denied.said(), "Autorisation refusée.");
+    assert_eq!(
+        denied.said(),
+        "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande."
+    );
     assert_eq!(denied.m.enrolled, None);
     env.authority.allow_all();
     denied.start();
@@ -715,7 +727,10 @@ fn service_unavailable_no_reader_and_service_lost() {
     let bus = PrivateBus::start();
     let mut app = App::new(&bus.address);
     app.start();
-    assert_eq!(app.said(), "Le service d'empreintes n'est pas disponible.");
+    assert_eq!(
+        app.said(),
+        "Le programme des empreintes ne fonctionne pas. Redémarrez l'ordinateur, puis réessayez."
+    );
     assert!(app.m.can_enroll());
     // No bus at all.
     let mut nobus = App::new("unix:path=/nonexistent/fingerprint-settings-test");
@@ -733,7 +748,10 @@ fn service_unavailable_no_reader_and_service_lost() {
     }
     let mut app = env.app();
     app.start();
-    assert_eq!(app.said(), "Aucun lecteur d'empreintes détecté.");
+    assert_eq!(
+        app.said(),
+        "Aucun lecteur d'empreintes n'a été trouvé sur cet ordinateur."
+    );
     // Plugged back: the button finds it and enrols.
     env.fake.plug();
     wait_ready(&env.bus.address);
@@ -751,7 +769,10 @@ fn service_unavailable_no_reader_and_service_lost() {
     );
     env.daemon.take().unwrap().stop().unwrap();
     app.until("the loss to be noticed", |m| !m.busy());
-    assert_eq!(app.said(), "Le service d'empreintes n'est pas disponible.");
+    assert_eq!(
+        app.said(),
+        "Le programme des empreintes ne fonctionne pas. Redémarrez l'ordinateur, puis réessayez."
+    );
     assert!(app.m.can_enroll());
 }
 
@@ -823,7 +844,7 @@ fn older_service_removes_all() {
     assert_eq!(app.m.enrolled, Some(true));
 
     app.remove();
-    assert_eq!(app.said(), "Empreinte supprimée.");
+    assert_eq!(app.said(), "L'empreinte a été supprimée.");
     assert_eq!(app.m.enrolled, Some(false));
     assert!(fingers.lock().unwrap().is_empty());
     assert_eq!(
@@ -884,7 +905,7 @@ fn a_call_without_answer_times_out() {
     );
     assert_eq!(
         app.said(),
-        "Le service d'empreintes ne répond pas. Réessayez."
+        "Le programme des empreintes ne répond pas. Réessayez."
     );
     // The claim may have happened after all: released anyway.
     assert!(

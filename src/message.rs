@@ -55,20 +55,20 @@ mod tests {
 
     #[test]
     fn renders_in_english_and_french() {
-        let fr = Catalogue::from_po(
-            "msgid \"{n} left\"\nmsgstr \"encore {n}\"\n\nmsgid \"Remove\"\nmsgstr \"Supprimer\"\n",
-        )
-        .unwrap();
+        // A catalogue of its own: the application has no placeholder message.
+        let fr = Catalogue::from_po("msgid \"{n} left\"\nmsgstr \"encore {n}\"\n").unwrap();
         let m = msg("{n} left").with("n", 2);
         assert_eq!(m.render(&Catalogue::default()), "2 left");
         assert_eq!(m.render(&fr), "encore 2");
         // The active language is English in unit tests (never initialised).
         assert_eq!(m.text(), "2 left");
-        assert_eq!(msg("Remove").text(), "Remove");
-        assert_eq!(msg("Remove").render(&fr), "Supprimer");
         assert_eq!(
-            msg("Remove").render(&Catalogue::builtin("fr").unwrap()),
-            "Supprimer"
+            msg("Remove the fingerprint").text(),
+            "Remove the fingerprint"
+        );
+        assert_eq!(
+            msg("Remove the fingerprint").render(&Catalogue::builtin("fr").unwrap()),
+            "Supprimer l'empreinte"
         );
     }
 }

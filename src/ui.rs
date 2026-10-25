@@ -83,6 +83,7 @@ struct Widgets {
     spinner: adw::Spinner,
     instruction: gtk::Label,
     progress: gtk::ProgressBar,
+    help: gtk::Label,
     message: gtk::Label,
     enroll: gtk::Button,
     cancel: gtk::Button,
@@ -147,13 +148,16 @@ impl Ui {
         let progress = gtk::ProgressBar::new();
         progress.add_css_class("big");
         b.append(&progress);
+        // One or two plain sentences for a first-time user.
+        let help = label(&["body"]);
+        b.append(&help);
         let message = label(&["heading"]);
         b.append(&message);
         let enroll = button(tr("Register my right index finger"), "suggested-action");
         b.append(&enroll);
         let cancel = button(tr("Cancel"), "");
         b.append(&cancel);
-        let remove = button(tr("Remove"), "destructive-action");
+        let remove = button(tr("Remove the fingerprint"), "destructive-action");
         b.append(&remove);
 
         let clamp = adw::Clamp::builder().maximum_size(560).child(&b).build();
@@ -180,6 +184,7 @@ impl Ui {
             spinner,
             instruction,
             progress,
+            help,
             message,
             enroll,
             cancel,
@@ -287,13 +292,16 @@ impl Ui {
                 w.progress.set_fraction(e.fraction());
                 e.instruction.text()
             }
-            Activity::Removing(_) => tr("Removing…").into(),
+            Activity::Removing(_) => tr("Removing the fingerprint…").into(),
             _ => String::new(),
         };
         w.instruction.set_label(&instruction);
         w.instruction.set_visible(!instruction.is_empty());
         w.progress
             .set_visible(matches!(m.activity, Activity::Enrolling(_)));
+        let help = m.help().map(|h| h.text()).unwrap_or_default();
+        w.help.set_label(&help);
+        w.help.set_visible(!help.is_empty());
         let waiting = match &m.activity {
             Activity::Loading { .. } | Activity::Removing(_) => true,
             Activity::Enrolling(e) => e.step != Step::Scanning,

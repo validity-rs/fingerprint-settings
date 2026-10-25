@@ -81,11 +81,15 @@ impl EnrollResult {
     pub fn failure(&self) -> Option<Message> {
         Some(match self {
             EnrollResult::Failed => msg("Registration failed. Try again."),
-            EnrollResult::DataFull => msg("The reader's memory is full."),
+            EnrollResult::DataFull => {
+                msg("The reader's memory is full: it cannot register another fingerprint.")
+            }
             EnrollResult::Duplicate => {
                 msg("This finger is already registered (perhaps on another account).")
             }
-            EnrollResult::Disconnected => msg("The fingerprint reader was disconnected."),
+            EnrollResult::Disconnected => {
+                msg("The fingerprint reader stopped responding. Try again.")
+            }
             EnrollResult::UnknownError | EnrollResult::Other(_) => unknown_error(),
             _ => return None,
         })
@@ -94,7 +98,7 @@ impl EnrollResult {
 
 /// While the enrolment goes on: lift the finger and place it again.
 pub fn lift_and_place() -> Message {
-    msg("Lift and place your finger again…")
+    msg("Lift your finger, then place it again.")
 }
 
 /// The driver reported an error it could not explain.
@@ -104,7 +108,7 @@ pub fn unknown_error() -> Message {
 
 /// The first instruction of an enrolment.
 pub fn enroll_first() -> Message {
-    msg("Place your finger…")
+    msg("Place your right index finger on the reader.")
 }
 
 #[cfg(test)]
@@ -137,7 +141,7 @@ mod tests {
                 (Some(_), Some(_)) => panic!("{s}: both"),
             }
         };
-        let again = Some("Relevez et reposez le doigt…".to_string());
+        let again = Some("Relevez le doigt, puis reposez-le.".to_string());
         let cases = [
             ("enroll-completed", None),
             (
@@ -152,7 +156,7 @@ mod tests {
             ("enroll-remove-and-retry", again.clone()),
             (
                 "enroll-data-full",
-                Some("La mémoire du lecteur est pleine.".to_string()),
+                Some("La mémoire du lecteur est pleine : il ne peut pas enregistrer d'autre empreinte.".to_string()),
             ),
             (
                 "enroll-duplicate",
@@ -160,7 +164,7 @@ mod tests {
             ),
             (
                 "enroll-disconnected",
-                Some("Le lecteur d'empreintes a été débranché.".to_string()),
+                Some("Le lecteur d'empreintes ne répond plus. Réessayez.".to_string()),
             ),
             (
                 "enroll-unknown-error",
@@ -170,7 +174,10 @@ mod tests {
         for (s, want) in cases {
             assert_eq!(said(s), want, "{s}");
         }
-        assert_eq!(enroll_first().render(&fr), "Posez le doigt…");
+        assert_eq!(
+            enroll_first().render(&fr),
+            "Posez votre index droit sur le lecteur."
+        );
         // A result from a newer service: ongoing, the finger is placed again;
         // final (done), an error the user can read.
         let other = EnrollResult::parse("enroll-something-new");

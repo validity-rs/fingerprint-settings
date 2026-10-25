@@ -150,18 +150,22 @@ impl ErrorKind {
     /// What to tell the user: one plain sentence.
     pub fn message(self) -> Message {
         match self {
-            ErrorKind::Unavailable => msg("The fingerprint service is not available."),
-            ErrorKind::NoReader => msg("No fingerprint reader detected."),
+            ErrorKind::Unavailable => {
+                msg("The fingerprint program is not working. Restart the computer, then try again.")
+            }
+            ErrorKind::NoReader => msg("No fingerprint reader was found on this computer."),
             ErrorKind::Busy => {
                 msg("The reader is in use by another program. Try again in a moment.")
             }
-            ErrorKind::PermissionDenied => msg("Permission denied."),
-            ErrorKind::NoPrints => msg("No fingerprint registered."),
+            ErrorKind::PermissionDenied => msg(
+                "Permission was refused. Try again, and type your password if the computer asks for it.",
+            ),
+            ErrorKind::NoPrints => msg("No fingerprint is registered."),
             ErrorKind::AlreadyEnrolled => msg("This finger is already registered."),
             ErrorKind::NotDeleted => msg("The fingerprint could not be removed. Try again."),
-            ErrorKind::Timeout => msg("The fingerprint service is not answering. Try again."),
+            ErrorKind::Timeout => msg("The fingerprint program is not answering. Try again."),
             ErrorKind::Unsupported | ErrorKind::Failed => {
-                msg("The fingerprint service reported an error. Try again.")
+                msg("The fingerprint program had a problem. Try again.")
             }
         }
     }
@@ -386,15 +390,21 @@ mod tests {
         let cases = [
             (
                 ErrorKind::Unavailable,
-                "Le service d'empreintes n'est pas disponible.",
+                "Le programme des empreintes ne fonctionne pas. Redémarrez l'ordinateur, puis réessayez.",
             ),
-            (ErrorKind::NoReader, "Aucun lecteur d'empreintes détecté."),
+            (
+                ErrorKind::NoReader,
+                "Aucun lecteur d'empreintes n'a été trouvé sur cet ordinateur.",
+            ),
             (
                 ErrorKind::Busy,
                 "Le lecteur est utilisé par un autre programme. Réessayez dans un instant.",
             ),
-            (ErrorKind::PermissionDenied, "Autorisation refusée."),
-            (ErrorKind::NoPrints, "Aucune empreinte enregistrée."),
+            (
+                ErrorKind::PermissionDenied,
+                "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande.",
+            ),
+            (ErrorKind::NoPrints, "Aucune empreinte n'est enregistrée."),
             (ErrorKind::AlreadyEnrolled, "Ce doigt est déjà enregistré."),
             (
                 ErrorKind::NotDeleted,
@@ -402,15 +412,15 @@ mod tests {
             ),
             (
                 ErrorKind::Timeout,
-                "Le service d'empreintes ne répond pas. Réessayez.",
+                "Le programme des empreintes ne répond pas. Réessayez.",
             ),
             (
                 ErrorKind::Unsupported,
-                "Le service d'empreintes a signalé une erreur. Réessayez.",
+                "Le programme des empreintes a eu un problème. Réessayez.",
             ),
             (
                 ErrorKind::Failed,
-                "Le service d'empreintes a signalé une erreur. Réessayez.",
+                "Le programme des empreintes a eu un problème. Réessayez.",
             ),
         ];
         assert_eq!(cases.len(), ErrorKind::ALL.len());
@@ -423,7 +433,7 @@ mod tests {
             ServiceError::from_dbus_name("net.reactivated.Fprint.Error.PermissionDenied", None)
                 .message()
                 .render(&fr),
-            "Autorisation refusée."
+            "L'autorisation a été refusée. Réessayez, et tapez votre mot de passe si l'ordinateur le demande."
         );
     }
 }

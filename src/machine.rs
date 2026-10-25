@@ -55,7 +55,7 @@ pub enum Input {
     Start,
     /// "Register my right index finger".
     Enroll,
-    /// "Remove".
+    /// "Remove the fingerprint".
     Remove,
     /// "Cancel" during an enrolment (or the window is closing).
     Cancel,
@@ -219,11 +219,28 @@ impl Model {
     pub fn status(&self) -> Option<Message> {
         self.enrolled.map(|e| {
             if e {
-                msg("Right index finger registered")
+                msg("Your right index finger is registered.")
             } else {
-                msg("No fingerprint registered")
+                msg("No fingerprint is registered yet.")
             }
         })
+    }
+
+    /// A short explanation for someone who has never used a fingerprint
+    /// reader: where it is, before registering; what to do, while
+    /// registering. `None` otherwise. The reader's light is real: the sensor
+    /// lights up while it waits for a finger. Its place on the computer
+    /// depends on the model, so it is not named.
+    pub fn help(&self) -> Option<Message> {
+        match &self.activity {
+            Activity::Enrolling(e) if e.outcome.is_none() => Some(msg(
+                "Place your finger flat on the reader when it is lit, then lift it. Do it again, moving your finger a little each time, until the bar is full.",
+            )),
+            _ if self.can_enroll() => Some(msg(
+                "The fingerprint reader is the small pad on the computer where you place your finger. It lights up when it is waiting for your finger.",
+            )),
+            _ => None,
+        }
     }
 
     /// Whether "Register my right index finger" can be used now.
@@ -231,12 +248,12 @@ impl Model {
         self.activity == Activity::Idle && self.enrolled != Some(true)
     }
 
-    /// Whether "Remove" is shown: the finger is enrolled.
+    /// Whether "Remove the fingerprint" is shown: the finger is enrolled.
     pub fn shows_remove(&self) -> bool {
         self.enrolled == Some(true)
     }
 
-    /// Whether "Remove" can be used now.
+    /// Whether "Remove the fingerprint" can be used now.
     pub fn can_remove(&self) -> bool {
         self.activity == Activity::Idle && self.shows_remove()
     }
@@ -547,7 +564,7 @@ impl Model {
                 match r.result {
                     Some(Removed::Yes) => {
                         self.enrolled = Some(false);
-                        self.message = Some(msg("Fingerprint removed."));
+                        self.message = Some(msg("The fingerprint has been removed."));
                     }
                     Some(Removed::Failed(e)) => self.message = Some(e.message()),
                     None => {}
@@ -565,7 +582,7 @@ fn start_enroll() -> (Activity, Vec<Command>) {
             stages: None,
             passed: 0,
             step: Step::Claiming,
-            instruction: msg("Getting the reader ready…"),
+            instruction: msg("Getting the reader ready, one moment…"),
             outcome: None,
             cancel: false,
         }),
