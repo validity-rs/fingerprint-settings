@@ -29,6 +29,13 @@ Synaptics `06cb:009a` sensors of ThinkPad T480-class laptops.
 One screen, in English or French (it follows the desktop's language). In
 French the app is called « Empreintes digitales ».
 
+| English | French |
+|---|---|
+| ![The app before any fingerprint is registered, in English](docs/screenshots/en.png) | ![The same screen in French](docs/screenshots/fr.png) |
+
+The screenshots show the app against validity-rs's emulated reader (see
+[Try it without a reader](#try-it-without-a-reader)).
+
 - A status line: "Your right index finger is registered." or "No fingerprint
   is registered yet."
 - Before registering, where the reader is and that it lights up when it is
