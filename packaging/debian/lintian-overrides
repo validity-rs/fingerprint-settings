@@ -1,6 +1,3 @@
-# The package is not uploaded to Debian but to the project's own APT
-# repository: there is no ITP bug for its first changelog entry to close.
-fingerprint-settings: initial-upload-closes-no-bugs [usr/share/doc/fingerprint-settings/changelog.Debian.gz:1]
 # A Rust binary: it calls no C function that _FORTIFY_SOURCE could replace
 # with a checked variant, so there are none to find.
 fingerprint-settings: hardening-no-fortify-functions [usr/bin/fingerprint-settings]
