@@ -4,6 +4,8 @@
 [![Release](https://img.shields.io/github/v/release/validity-rs/fingerprint-settings)](https://github.com/validity-rs/fingerprint-settings/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**[Website](https://validity-rs.github.io/)** · [Driver and service](https://github.com/validity-rs/validity-rs) · [Fingerprints app](https://github.com/validity-rs/fingerprint-settings) · [APT repository](https://validity-rs.github.io/apt/) · [Tool reference](https://validity-rs.github.io/docs.html)
+
 Fingerprints is a small desktop app that does one thing: register your right
 index finger, or remove it, so that touching the reader unlocks the computer.
 It is meant for desktops without fingerprint settings of their own, such as
