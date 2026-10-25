@@ -127,13 +127,18 @@ pub struct Enroll {
 }
 
 impl Enroll {
-    /// Progress from 0 to 1 (`None`: the number of stages is unknown).
-    pub fn fraction(&self) -> Option<f64> {
+    /// Progress from 0 to 1, for the one indicator on screen. It moves only
+    /// on a good scan and never back; full when the finger is enrolled. The
+    /// number of stages, when the device says, only scales it (it is never
+    /// shown); unknown, each good scan fills a quarter of what is left.
+    pub fn fraction(&self) -> f64 {
         if self.outcome == Some(Outcome::Completed) {
-            return Some(1.0);
+            return 1.0;
         }
-        self.stages
-            .map(|n| (f64::from(self.passed) / f64::from(n)).clamp(0.0, 1.0))
+        match self.stages {
+            Some(n) => (f64::from(self.passed) / f64::from(n)).clamp(0.0, 1.0),
+            None => 1.0 - 0.75_f64.powf(f64::from(self.passed)),
+        }
     }
 
     /// Whether "Cancel" still means something: the enrolment is not stopping
@@ -432,7 +437,7 @@ impl Model {
                             e.passed = e.passed.min(n.saturating_sub(1));
                         }
                     }
-                    if let Some(i) = r.instruction(e.passed, e.stages) {
+                    if let Some(i) = r.instruction() {
                         e.instruction = i;
                     }
                     return (Activity::Enrolling(e), vec![]);

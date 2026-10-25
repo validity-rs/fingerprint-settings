@@ -354,6 +354,8 @@ struct App {
     sent: Vec<Command>,
     /// Every enrolment instruction shown, in English.
     instructions: Vec<String>,
+    /// Every level of the progress indicator shown.
+    fractions: Vec<f64>,
 }
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -369,6 +371,7 @@ impl App {
             service: Service::start_with(Bus::Address(address.to_string()), deadlines).unwrap(),
             sent: Vec::new(),
             instructions: Vec::new(),
+            fractions: Vec::new(),
         }
     }
 
@@ -381,6 +384,9 @@ impl App {
             let text = e.instruction.render(&Catalogue::default());
             if self.instructions.last() != Some(&text) {
                 self.instructions.push(text);
+            }
+            if self.fractions.last() != Some(&e.fraction()) {
+                self.fractions.push(e.fraction());
             }
         }
     }
@@ -541,12 +547,21 @@ fn enrol_and_remove() {
         [
             "Getting the reader ready…",
             "Place your finger…",
-            "Again… 1/6",
-            "Again… 2/6",
-            "Poorly read, place your finger again.",
-            "Again… 3/6",
-            "Again… 4/6",
-            "Again… 5/6",
+            "Lift and place your finger again…",
+        ]
+    );
+    // One indicator, forward only, one step per good scan (the redundant
+    // image and the failed capture leave it where it is), full at the end.
+    assert_eq!(
+        app.fractions,
+        [
+            0.0,
+            1.0 / 6.0,
+            2.0 / 6.0,
+            3.0 / 6.0,
+            4.0 / 6.0,
+            5.0 / 6.0,
+            1.0
         ]
     );
     assert_eq!(

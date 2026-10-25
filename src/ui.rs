@@ -284,11 +284,7 @@ impl Ui {
 
         let instruction = match &m.activity {
             Activity::Enrolling(e) => {
-                match e.fraction() {
-                    Some(f) => w.progress.set_fraction(f),
-                    None if e.step == Step::Scanning => w.progress.pulse(),
-                    None => w.progress.set_fraction(0.0),
-                }
+                w.progress.set_fraction(e.fraction());
                 e.instruction.text()
             }
             Activity::Removing(_) => tr("Removing…").into(),

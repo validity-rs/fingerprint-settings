@@ -68,24 +68,12 @@ impl EnrollResult {
     }
 
     /// What to ask of the user after this result while the enrolment goes
-    /// on, with the good scans so far and the number needed when the device
-    /// says (`None` for final results).
-    pub fn instruction(&self, passed: u32, stages: Option<u32>) -> Option<Message> {
-        Some(match self {
-            EnrollResult::StagePassed => match stages {
-                Some(total) => msg("Again… {passed}/{total}")
-                    .with("passed", passed)
-                    .with("total", total),
-                None => msg("Again…"),
-            },
-            EnrollResult::RetryScan
-            | EnrollResult::SwipeTooShort
-            | EnrollResult::TooFast
-            | EnrollResult::FingerNotCentered
-            | EnrollResult::RemoveAndRetry
-            | EnrollResult::Other(_) => misread(),
-            _ => return None,
-        })
+    /// on (`None` for final results). The same gentle hint after a good scan
+    /// and after one that did not take: the enrolment simply keeps going
+    /// until it is done, without counting scans or blaming the user; only the
+    /// progress indicator tells them apart.
+    pub fn instruction(&self) -> Option<Message> {
+        (!self.is_final()).then(lift_and_place)
     }
 
     /// Why the enrolment failed, for a final result other than `Completed`
@@ -104,9 +92,9 @@ impl EnrollResult {
     }
 }
 
-/// A scan that did not take: the user places the finger again.
-pub fn misread() -> Message {
-    msg("Poorly read, place your finger again.")
+/// While the enrolment goes on: lift the finger and place it again.
+pub fn lift_and_place() -> Message {
+    msg("Lift and place your finger again…")
 }
 
 /// The driver reported an error it could not explain.
@@ -125,14 +113,15 @@ mod tests {
     use crate::i18n::Catalogue;
 
     /// Every result fprintd sends, and exactly what the user reads in
-    /// French: an instruction while it goes on, a reason when it fails.
+    /// French: one neutral hint while it goes on (no count, no blame), a
+    /// reason when it fails.
     #[test]
     fn every_status_has_its_french_sentence() {
         let fr = Catalogue::builtin("fr").unwrap();
         let said = |s: &str| {
             let r = EnrollResult::parse(s);
             assert!(!matches!(r, EnrollResult::Other(_)), "{s}");
-            match (r.instruction(2, Some(6)), r.failure()) {
+            match (r.instruction(), r.failure()) {
                 (Some(i), None) => {
                     assert!(!r.is_final(), "{s}");
                     Some(i.render(&fr))
@@ -148,19 +137,19 @@ mod tests {
                 (Some(_), Some(_)) => panic!("{s}: both"),
             }
         };
-        let misread = Some("Mal lu, reposez le doigt.".to_string());
+        let again = Some("Relevez et reposez le doigt…".to_string());
         let cases = [
             ("enroll-completed", None),
             (
                 "enroll-failed",
                 Some("L'enregistrement a échoué. Réessayez.".to_string()),
             ),
-            ("enroll-stage-passed", Some("Encore… 2/6".to_string())),
-            ("enroll-retry-scan", misread.clone()),
-            ("enroll-swipe-too-short", misread.clone()),
-            ("enroll-too-fast", misread.clone()),
-            ("enroll-finger-not-centered", misread.clone()),
-            ("enroll-remove-and-retry", misread.clone()),
+            ("enroll-stage-passed", again.clone()),
+            ("enroll-retry-scan", again.clone()),
+            ("enroll-swipe-too-short", again.clone()),
+            ("enroll-too-fast", again.clone()),
+            ("enroll-finger-not-centered", again.clone()),
+            ("enroll-remove-and-retry", again.clone()),
             (
                 "enroll-data-full",
                 Some("La mémoire du lecteur est pleine.".to_string()),
@@ -182,20 +171,12 @@ mod tests {
             assert_eq!(said(s), want, "{s}");
         }
         assert_eq!(enroll_first().render(&fr), "Posez le doigt…");
-        // The device does not say how many scans it needs.
-        assert_eq!(
-            EnrollResult::StagePassed
-                .instruction(1, None)
-                .unwrap()
-                .render(&fr),
-            "Encore…"
-        );
         // A result from a newer service: ongoing, the finger is placed again;
         // final (done), an error the user can read.
         let other = EnrollResult::parse("enroll-something-new");
         assert_eq!(other, EnrollResult::Other("enroll-something-new".into()));
         assert!(!other.is_final());
-        assert_eq!(other.instruction(0, None), Some(super::misread()));
+        assert_eq!(other.instruction(), Some(lift_and_place()));
         assert_eq!(other.failure(), Some(unknown_error()));
         assert!(EnrollResult::Completed.failure().is_none());
         assert!(EnrollResult::StagePassed.failure().is_none());

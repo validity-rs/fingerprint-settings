@@ -48,14 +48,8 @@ msgstr "Préparation du lecteur…"
 msgid "Place your finger…"
 msgstr "Posez le doigt…"
 
-msgid "Again…"
-msgstr "Encore…"
-
-msgid "Again… {passed}/{total}"
-msgstr "Encore… {passed}/{total}"
-
-msgid "Poorly read, place your finger again."
-msgstr "Mal lu, reposez le doigt."
+msgid "Lift and place your finger again…"
+msgstr "Relevez et reposez le doigt…"
 
 msgid "Registration complete."
 msgstr "Enregistrement terminé."

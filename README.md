@@ -11,8 +11,11 @@ One screen:
 - a status line: "Index droit enregistré" (right index finger registered)
   or "Aucune empreinte enregistrée" (no fingerprint registered);
 - one big button, **Enregistrer mon index droit** (register my right index
-  finger), with the progress as you touch the reader: "Posez le doigt…",
-  "Encore… 2/6", "Mal lu, reposez le doigt." when a scan did not take;
+  finger); while you touch the reader, one progress bar fills with each
+  good scan and one gentle hint stays on screen ("Posez le doigt…", then
+  "Relevez et reposez le doigt…"): no scan count, and a scan that did not
+  take is not an error, the bar just waits for the next one, until it is
+  done;
 - **Supprimer** (remove), only when the finger is registered.
 
 Every result and error the service can give is one plain sentence (for
@@ -147,7 +150,8 @@ cargo test --manifest-path e2e/Cargo.toml    # the end-to-end test
 
 - Unit tests of the UI-free core (`src/machine.rs` and its tests, `status`,
   `error`, `i18n`): every enrolment result and every service error mapped to
-  its exact French sentence, every error path, cancelling at each step, the
+  its exact French sentence, the progress bar moving forward on good scans
+  only, every error path, cancelling at each step, the
   rule that a claimed reader is always released, the fallback to
   `DeleteEnrolledFingers2`, and the screen staying usable after any failure.
 - `tests/translations.rs`: every user-visible string has a French

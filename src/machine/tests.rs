@@ -79,24 +79,41 @@ fn start_reads_the_status() {
 fn enroll_with_progress() {
     let mut m = scanning();
     assert_eq!(fr(&enrolling(&m).instruction), "Posez le doigt…");
+    assert_eq!(enrolling(&m).fraction(), 0.0);
     assert!(m.holds_reader() && !m.can_enroll());
+    // Good scans fill the indicator; the instruction never counts them.
     for n in 1..=5 {
         assert_eq!(m.update(status("enroll-stage-passed", false)), []);
-        assert_eq!(fr(&enrolling(&m).instruction), format!("Encore… {n}/6"));
+        let e = enrolling(&m);
+        assert_eq!(fr(&e.instruction), "Relevez et reposez le doigt…");
+        assert_eq!(e.fraction(), f64::from(n) / 6.0);
     }
-    assert_eq!(enrolling(&m).fraction(), Some(5.0 / 6.0));
-    m.update(status("enroll-retry-scan", false));
-    assert_eq!(fr(&enrolling(&m).instruction), "Mal lu, reposez le doigt.");
+    // Scans that did not take: the same neutral hint, no blame, and the
+    // indicator does not move.
+    for s in [
+        "enroll-retry-scan",
+        "enroll-swipe-too-short",
+        "enroll-too-fast",
+        "enroll-finger-not-centered",
+        "enroll-remove-and-retry",
+        "enroll-something-new",
+    ] {
+        assert_eq!(m.update(status(s, false)), [], "{s}");
+        let e = enrolling(&m);
+        assert_eq!(fr(&e.instruction), "Relevez et reposez le doigt…", "{s}");
+        assert_eq!((e.fraction(), e.outcome.clone()), (5.0 / 6.0, None), "{s}");
+    }
     // A stage beyond the count does not go past the last one.
     m.update(status("enroll-stage-passed", false));
     assert_eq!(enrolling(&m).passed, 5);
+    assert_eq!(enrolling(&m).fraction(), 5.0 / 6.0);
     assert_eq!(
         m.update(status("enroll-completed", true)),
         [Command::EnrollStop]
     );
     let e = enrolling(&m);
     assert_eq!((e.outcome.clone(), e.passed), (Some(Outcome::Completed), 6));
-    assert_eq!(e.fraction(), Some(1.0));
+    assert_eq!(e.fraction(), 1.0);
     assert!(!e.cancellable());
     assert_eq!(m.update(Input::EnrollStopped(Ok(()))), [Command::Release]);
     assert_eq!(m.update(Input::Released(Ok(()))), [Command::List]);
@@ -113,11 +130,26 @@ fn unknown_stage_count() {
     m.update(Input::Enroll);
     m.update(Input::Claimed(Ok(None)));
     m.update(Input::EnrollStarted(Ok(())));
-    m.update(status("enroll-stage-passed", false));
-    let e = enrolling(&m);
-    assert_eq!((fr(&e.instruction), e.fraction()), ("Encore…".into(), None));
+    assert_eq!(enrolling(&m).fraction(), 0.0);
+    // Each good scan fills a quarter of what is left: forward, never full.
+    let mut last = 0.0;
+    for want in [0.25, 0.4375, 0.578125] {
+        m.update(status("enroll-stage-passed", false));
+        let e = enrolling(&m);
+        assert_eq!(fr(&e.instruction), "Relevez et reposez le doigt…");
+        assert_eq!(e.fraction(), want);
+        assert!(e.fraction() > last);
+        last = e.fraction();
+    }
+    // A scan that did not take leaves it where it is.
+    m.update(status("enroll-retry-scan", false));
+    assert_eq!(enrolling(&m).fraction(), last);
+    for _ in 0..100 {
+        m.update(status("enroll-stage-passed", false));
+    }
+    assert!(enrolling(&m).fraction() < 1.0);
     m.update(status("enroll-completed", true));
-    assert_eq!(enrolling(&m).fraction(), Some(1.0));
+    assert_eq!(enrolling(&m).fraction(), 1.0);
 }
 
 #[test]
