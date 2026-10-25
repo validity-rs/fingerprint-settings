@@ -26,7 +26,7 @@ say() { printf '\n== %s\n' "$*"; }
 
 say "install ($distro)"
 case $distro in
-debian)
+debian | ubuntu-*)
     apt-get update -q
     apt-get install -y --no-install-recommends "$dir"/fingerprint-settings_*.deb
     dpkg-query -W fingerprint-settings
@@ -83,7 +83,7 @@ sh "$here/smoke.sh" "$dir/stub_service"
 
 say "remove"
 case $distro in
-debian) apt-get purge -y fingerprint-settings ;;
+debian | ubuntu-*) apt-get purge -y fingerprint-settings ;;
 fedora) dnf remove -y fingerprint-settings ;;
 archlinux) pacman -R --noconfirm fingerprint-settings ;;
 alpine) apk del fingerprint-settings fingerprint-settings-doc ;;

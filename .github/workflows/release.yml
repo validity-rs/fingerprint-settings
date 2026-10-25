@@ -74,7 +74,7 @@ jobs:
       # Every package's result is worth seeing, even when one fails.
       fail-fast: false
       matrix:
-        distro: [debian, fedora, archlinux, alpine]
+        distro: [debian, ubuntu-resolute, fedora, archlinux, alpine]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,7 +119,7 @@ jobs:
           path: dist/packages
       - name: Release files and SHA256SUMS
         run: |
-          for d in debian fedora archlinux alpine; do mv "dist/packages/package-$d" "dist/$d"; done
+          for d in debian ubuntu-resolute fedora archlinux alpine; do mv "dist/packages/package-$d" "dist/$d"; done
           ci/run.sh release-files
       - name: Keep the dry run's files
         if: github.ref_type != 'tag'
@@ -141,7 +141,7 @@ jobs:
         run: |
           gh release create "$TAG" --draft --verify-tag --repo "$GITHUB_REPOSITORY" \
             --title "Fingerprints $TAG" \
-            --notes "Packages for Debian 13, Fedora, Arch Linux and Alpine 3.24, built from the vendored source tarball. Check a file with \`sha256sum -c SHA256SUMS\` and its provenance with \`gh attestation verify FILE --repo $GITHUB_REPOSITORY\`." \
+            --notes "Packages for Debian 13, Ubuntu 26.04, Fedora, Arch Linux and Alpine 3.24, built from the vendored source tarball. Check a file with \`sha256sum -c SHA256SUMS\` and its provenance with \`gh attestation verify FILE --repo $GITHUB_REPOSITORY\`." \
             dist/release/*
 
   crates-io:

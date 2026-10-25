@@ -8,7 +8,8 @@
 #   ci/run.sh distro:fedora      # the tests on one distro (distro: all four)
 #   ci/run.sh package:alpine     # one package's full cycle (package: all four)
 #
-# Distros: debian (the reference, Debian 13), fedora, archlinux, alpine. Each
+# Distros: debian (the reference, Debian 13), ubuntu-resolute (Ubuntu 26.04;
+# not 24.04, whose GTK and libadwaita are too old), fedora, archlinux, alpine. Each
 # has one image, docker/Dockerfile.<distro>, with three stages: `ci` (build
 # and test), `package` (build and check the package) and `install` (a fresh
 # system, where the package is installed, launched and removed).
@@ -49,7 +50,7 @@ GITLEAKS_VERSION=8.30.1
 GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
 ZIZMOR_VERSION=1.31.1
 ZIZMOR_SHA256=d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
-DISTROS=(debian fedora archlinux alpine)
+DISTROS=(debian ubuntu-resolute fedora archlinux alpine)
 
 cd "$(git rev-parse --show-toplevel)"
 # No warning is tolerated, in any cargo invocation.
@@ -287,6 +288,7 @@ job_release_files() {
     mkdir -p "$d"
     cp "dist/fingerprint-settings-$v.tar.gz" "$d/"
     cp dist/debian/fingerprint-settings_*.deb "$d/"
+    cp dist/ubuntu-resolute/fingerprint-settings_*.deb "$d/"
     cp dist/fedora/fingerprint-settings-*.rpm "$d/"
     cp dist/archlinux/fingerprint-settings-*.pkg.tar.zst "$d/"
     cp dist/archlinux/PKGBUILD "$d/fingerprint-settings-$v.PKGBUILD"
@@ -303,7 +305,7 @@ job_publish() {
 }
 
 QUICK=(noai zizmor gitleaks fmt clippy doc test packaging e2e)
-ALL=("${QUICK[@]}" distro:fedora distro:archlinux distro:alpine package)
+ALL=("${QUICK[@]}" distro:ubuntu-resolute distro:fedora distro:archlinux distro:alpine package)
 
 jobs=("$@")
 [ ${#jobs[@]} -eq 0 ] && jobs=("${QUICK[@]}")

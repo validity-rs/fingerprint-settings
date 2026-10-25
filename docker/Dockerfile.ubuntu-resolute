@@ -1,0 +1,75 @@
+# Ubuntu 26.04 LTS (resolute): the Debian package, built and tested in this
+# release (GTK 4.22, libadwaita 1.9), for the resolute suite of validity-rs's
+# APT repository. Same three stages as docker/Dockerfile.debian:
+#
+#   ci       cargo test against this release's GTK and libadwaita
+#   package  builds the .deb from the tarball (cargo-deb) and checks it with
+#            this release's lintian
+#   install  a fresh Ubuntu 26.04, where the .deb is installed, launched and
+#            removed (ci/packages/install.sh)
+#
+# Ubuntu 24.04 (noble) is not built: GTK 4.14 and libadwaita 1.5 are older
+# than the crate's floor (GTK 4.18, libadwaita 1.7).
+#
+# Ubuntu's rustc is older than the crate's rust-version: the toolchain is the
+# official one, copied from the same pinned Rust image as Debian's (rustup's
+# builds need only glibc 2.17); everything it builds here links this
+# release's libraries. Every base image is pinned by version and digest.
+FROM rust:1.99.1-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc AS rust
+
+FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944 AS ci
+
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+COPY --from=rust /usr/local/rustup /usr/local/rustup
+COPY --from=rust /usr/local/cargo /usr/local/cargo
+# gcc, libc6-dev, pkg-config: what the Rust image's base brings for linking
+# and for the -sys crates. The rest as in Dockerfile.debian.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        appstream \
+        ca-certificates \
+        dbus-daemon \
+        desktop-file-utils \
+        gcc \
+        git \
+        libadwaita-1-dev \
+        libc6-dev \
+        libgtk-4-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --system --add safe.directory '*' \
+    && . /etc/os-release && echo "$PRETTY_NAME" \
+    && rustc --version && cargo --version \
+    && dbus-daemon --version | head -1 \
+    && pkg-config --modversion gtk4 libadwaita-1
+
+WORKDIR /src
+CMD ["/bin/bash"]
+
+FROM ci AS package
+
+# cargo-deb as in Dockerfile.debian, built here against this release's glibc.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends dpkg-dev lintian \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install --locked cargo-deb --version 3.8.0 \
+    && rm -rf /usr/local/cargo/registry \
+    && cargo deb --version && lintian --version
+
+FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944 AS install
+
+# As in Dockerfile.debian. The image installs no manual pages or
+# documentation (/etc/dpkg/dpkg.cfg.d/excludes); a system does, and
+# install.sh checks the manual page, so the exclusions go.
+RUN rm /etc/dpkg/dpkg.cfg.d/excludes \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        appstream \
+        dbus-daemon \
+        desktop-file-utils \
+        x11-utils \
+        xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+CMD ["/bin/bash"]

@@ -48,7 +48,8 @@ App id: `io.github.validity_rs.FingerprintSettings`. License: MIT.
   `DeleteEnrolledFingers2` on older services that lack it, which removes all
   of the user's prints).
 - GTK 4.18 or newer and libadwaita 1.7 or newer (Debian 13 "trixie" is the
-  oldest supported system).
+  oldest supported system; Ubuntu 26.04 works, Ubuntu 24.04, with GTK 4.14
+  and libadwaita 1.5, does not).
 - To build: Rust 1.99 or newer, and the development packages
   (Debian/Ubuntu: `libgtk-4-dev libadwaita-1-dev`; Fedora: `gtk4-devel
   libadwaita-devel`; Arch: `gtk4 libadwaita`; Alpine: `gtk4.0-dev
@@ -84,6 +85,7 @@ package:<distro>`; the files land in `dist/<distro>/`):
 | Distro | Recipe | Built with | Checked with | Depends on a service |
 |---|---|---|---|---|
 | Debian 13 | `[package.metadata.deb]` in `Cargo.toml`, `packaging/debian/` | cargo-deb 3.8.0 | lintian (errors, warnings and info fail; the two overrides are explained in `packaging/debian/lintian-overrides`) | `fprintd \| validity-daemon` |
+| Ubuntu 26.04 | the Debian recipe, built in Ubuntu 26.04 (`docker/Dockerfile.ubuntu-resolute`) with Debian revision `1.ubuntu26.04` | cargo-deb 3.8.0 | Ubuntu's lintian, as for Debian | `fprintd \| validity-daemon` |
 | Fedora 44 | `packaging/fedora/fingerprint-settings.spec` | rpmbuild, Fedora's Rust macros | rpmlint `--strict` | `(fprintd or validity-daemon)` |
 | Arch Linux | `packaging/archlinux/PKGBUILD.in` | makepkg | namcap (only the findings listed, with their reasons, in `packaging/archlinux/namcap-expected`) | `fprintd` (another service provides it) |
 | Alpine 3.24 | `packaging/alpine/APKBUILD.in` | abuild | apkbuild-lint | `fprintd` (likewise) |
@@ -116,7 +118,11 @@ Notes:
   made for each build.
 - The `.deb` is ready for an APT repository (`Section`, `Priority`,
   `md5sums`, a Debian changelog, versioned shared-library dependencies); the
-  repository itself is shared with validity-rs.
+  repository itself is shared with validity-rs, one suite per release: the
+  Debian build goes to `trixie`, the Ubuntu 26.04 one (its revision suffix
+  `.ubuntu26.04`, as validity-rs's `ci/packages/suites.sh` names the suites)
+  to `resolute`. Its `noble` suite (Ubuntu 24.04) carries no
+  fingerprint-settings: GTK and libadwaita there are too old.
 
 To install from source instead, for all users:
 
@@ -198,7 +204,7 @@ them):
 - `fmt clippy doc test packaging e2e` in the pinned Debian 13 image
   (`docker/Dockerfile.debian`) when docker is available, or on the host with
   `CI_HOST=1`;
-- `distro:<distro>`: `cargo test` on Debian 13, Fedora, Arch Linux and
+- `distro:<distro>`: `cargo test` on Debian 13, Ubuntu 26.04, Fedora, Arch Linux and
   Alpine 3.24, each with its own GTK 4 and libadwaita;
 - `package:<distro>`: the full package cycle above;
 - `tarball`, `release-files`, `publish`: used by the release workflow.

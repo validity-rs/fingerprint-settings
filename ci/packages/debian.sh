@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Builds the .deb from the vendored tarball and checks it:
 #
-#   ci/packages/debian.sh TARBALL OUTDIR
+#   ci/packages/debian.sh TARBALL OUTDIR [DEB REVISION]
+#
+# DEB REVISION (default 1) is how an Ubuntu build is told apart
+# (ci/packages/ubuntu-resolute.sh).
 #
 # Runs in the Debian image's package stage (docker/Dockerfile.debian), as
 # root. Offline: everything comes from the tarball. SOURCE_DATE_EPOCH is the
@@ -11,6 +14,7 @@ set -euo pipefail
 
 tarball=$(realpath "${1:?usage: debian.sh TARBALL OUTDIR}")
 out=$(realpath -m "${2:?usage: debian.sh TARBALL OUTDIR}")
+revision=${3:-}
 mkdir -p "$out"
 # A fixed build directory: paths end up in the binary (panic locations), and
 # the same paths make the same bytes. Each build runs in a fresh container.
@@ -25,7 +29,7 @@ export SOURCE_DATE_EPOCH
 SOURCE_DATE_EPOCH=$(stat -c %Y Cargo.toml)
 unset CARGO_TARGET_DIR
 
-cargo deb --locked --offline --output "$out/"
+cargo deb --locked --offline ${revision:+--deb-revision "$revision"} --output "$out/"
 cargo build --release --locked --offline --example stub_service
 install -m755 target/release/examples/stub_service "$out/stub_service"
 
