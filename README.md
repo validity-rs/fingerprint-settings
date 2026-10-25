@@ -41,9 +41,6 @@ French the app is called « Empreintes digitales ».
   next one.
 - **Remove the fingerprint**, shown only when the finger is registered.
 
-This is `main`. Release 0.1.0 has the same screen, with a scan count and
-earlier wording.
-
 Every result and error is one plain sentence that says what to do next (a
 finger already registered, perhaps on another account; permission refused;
 no reader found), and the screen stays usable after any of them. The password
@@ -54,7 +51,7 @@ always keeps working.
 | Distribution | Package |
 |---|---|
 | Debian 13 (trixie) | `fingerprint-settings` in the validity-rs APT repository |
-| Ubuntu 26.04 (resolute) | in the APT repository from the next release (built in CI, not released yet) |
+| Ubuntu 26.04 (resolute) | in the APT repository |
 | Fedora 44, Arch Linux, Alpine 3.24 | files on the [latest release](https://github.com/validity-rs/fingerprint-settings/releases/latest) |
 | Ubuntu 24.04 (noble) | not available: its GTK 4.14 and libadwaita 1.5 are too old |
 
@@ -69,9 +66,9 @@ sudo apt install fingerprint-settings
 From the release files (check them first, see [Release](#release)):
 
 ```bash
-sudo dnf install ./fingerprint-settings-0.1.0-1.fc44.x86_64.rpm                 # Fedora 44
-sudo pacman -U fingerprint-settings-0.1.0-1-x86_64.pkg.tar.zst                  # Arch Linux
-sudo apk add --allow-untrusted fingerprint-settings-0.1.0-r0.apk                # Alpine 3.24
+sudo dnf install ./fingerprint-settings-0.1.1-1.fc44.x86_64.rpm                 # Fedora 44
+sudo pacman -U fingerprint-settings-0.1.1-1-x86_64.pkg.tar.zst                  # Arch Linux
+sudo apk add --allow-untrusted fingerprint-settings-0.1.1-r0.apk                # Alpine 3.24
 ```
 
 The Alpine package is signed with a key made for each CI build, which is not
